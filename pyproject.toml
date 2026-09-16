@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edgearbiter"
+version = "0.1.0"
+description = "Multi-agent RL for adaptive AI model selection on IoT-edge devices"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Louay Akremi" }]
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.26",
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "gymnasium>=0.29",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "pydantic>=2.6",
+  "paho-mqtt>=2.0",
+  "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27", "python-multipart>=0.0.9"]
+
+[tool.setuptools.packages.find]
+include = ["edgearbiter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
