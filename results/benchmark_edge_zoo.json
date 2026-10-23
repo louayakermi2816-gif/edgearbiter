@@ -1,0 +1,322 @@
+{
+ "host": {
+  "label": "edge (this VM)",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "logical_cpus": 4,
+  "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+  "python": "3.13.17",
+  "torch": "2.14.1+cu130",
+  "torchvision": "0.29.1+cu130",
+  "date_utc": "2026-10-23T20:41:30Z"
+ },
+ "rows": [
+  {
+   "model": "mobilenet_v3_small",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 13.42046100035077,
+    "p95": 17.19449055053701,
+    "mean": 13.87979503007955
+   },
+   "size_mb": 10.3,
+   "memory_mb": 19.8,
+   "inference_mem_mb": 9.5,
+   "rss_peak_mb": 736.7,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_small",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 14.520306498525315,
+    "p95": 22.382215897960123,
+    "mean": 15.41891663964634
+   },
+   "size_mb": 10.3,
+   "memory_mb": 20.2,
+   "inference_mem_mb": 9.9,
+   "rss_peak_mb": 737.2,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 37.12269249990641,
+    "p95": 46.445958499498374,
+    "mean": 38.174401850155846
+   },
+   "size_mb": 22.13,
+   "memory_mb": 45.4,
+   "inference_mem_mb": 23.2,
+   "rss_peak_mb": 762.4,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 32.168689500394976,
+    "p95": 43.109801900573075,
+    "mean": 33.021778849833936
+   },
+   "size_mb": 22.13,
+   "memory_mb": 40.3,
+   "inference_mem_mb": 18.2,
+   "rss_peak_mb": 757.5,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "qnnpack",
+   "quantisation": "torchvision",
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 38.12135149928508,
+    "p95": 59.349188350279285,
+    "mean": 41.8449809199592
+   },
+   "size_mb": 5.65,
+   "memory_mb": 19.5,
+   "inference_mem_mb": 13.8,
+   "rss_peak_mb": 741.4,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "qnnpack",
+   "quantisation": "torchvision",
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 40.208000000347965,
+    "p95": 50.89300885119883,
+    "mean": 40.76894150010048
+   },
+   "size_mb": 5.65,
+   "memory_mb": 19.4,
+   "inference_mem_mb": 13.8,
+   "rss_peak_mb": 741.4,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 72.9424220025976,
+    "p95": 101.16890359913666,
+    "mean": 76.77614823012846
+   },
+   "size_mb": 46.84,
+   "memory_mb": 65.7,
+   "inference_mem_mb": 18.9,
+   "rss_peak_mb": 782.6,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 30.39831899877754,
+    "p95": 41.75494284918386,
+    "mean": 31.470051869655435
+   },
+   "size_mb": 46.84,
+   "memory_mb": 65.8,
+   "inference_mem_mb": 18.9,
+   "rss_peak_mb": 782.9,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "fbgemm",
+   "quantisation": "torchvision",
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 21.04196599975694,
+    "p95": 33.61167980110622,
+    "mean": 23.04881103023945
+   },
+   "size_mb": 11.84,
+   "memory_mb": 17.6,
+   "inference_mem_mb": 5.8,
+   "rss_peak_mb": 740.1,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "fbgemm",
+   "quantisation": "torchvision",
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 9.592627002348308,
+    "p95": 16.007093750158674,
+    "mean": 10.42850075980823
+   },
+   "size_mb": 11.84,
+   "memory_mb": 20.0,
+   "inference_mem_mb": 8.2,
+   "rss_peak_mb": 743.0,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "efficientnet_b0",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 59.1275204988051,
+    "p95": 72.57475770147721,
+    "mean": 60.82802309996623
+   },
+   "size_mb": 21.45,
+   "memory_mb": 48.3,
+   "inference_mem_mb": 26.8,
+   "rss_peak_mb": 765.5,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "efficientnet_b0",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 36.94118599923968,
+    "p95": 47.81304970274505,
+    "mean": 38.65789740029868
+   },
+   "size_mb": 21.45,
+   "memory_mb": 45.2,
+   "inference_mem_mb": 23.8,
+   "rss_peak_mb": 762.6,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 320,
+   "threads": 1,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 124.75113850086927,
+    "p95": 164.72586680210952,
+    "mean": 129.92255660021328
+   },
+   "size_mb": 14.06,
+   "memory_mb": 56.7,
+   "inference_mem_mb": 42.7,
+   "rss_peak_mb": 782.1,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "random",
+   "img": 320,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 110.02594949968625,
+    "p95": 137.32443765056811,
+    "mean": 111.1060561100021
+   },
+   "size_mb": 14.06,
+   "memory_mb": 51.3,
+   "inference_mem_mb": 37.3,
+   "rss_peak_mb": 775.6,
+   "accuracy": null,
+   "accuracy_metric": null
+  }
+ ]
+}
