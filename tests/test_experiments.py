@@ -6,7 +6,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from edgearbiter.costs import CostTable
-from edgearbiter.experiments import SCENARIOS, best_static, load_curves, run_experiment
+from edgearbiter.experiments import SCENARIOS, best_static, evaluate_learned, load_curves, run_experiment
 from edgearbiter.sim.env import SimConfig
 
 
@@ -29,4 +29,7 @@ def test_run_experiment_writes_tables_curves_and_actors(tmp_path):
     assert (models / "smoke" / "default" / "ppo_seed0_device.pt").exists()
     curve = load_curves(out, "default", "ppo", [0], "smoke")
     assert curve["n_seeds"] == 1 and len(curve["steps"]) == 2
+    other = CostTable(tiers=[dict(t, accuracy=0.5) for t in CostTable.synthetic().tiers])
+    with pytest.raises(ValueError, match="trained on cost table"):        # actors are evaluated on their own table only
+        evaluate_learned("default", "ppo", [0], out, models, other, n_episodes=1, name="smoke")
     assert set(SCENARIOS) == {"default", "energy_constrained"}

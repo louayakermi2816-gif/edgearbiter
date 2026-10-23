@@ -114,6 +114,7 @@ def train_run(job: dict) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         save_actor(actors[a], path, agent=a, algo=algo, scenario=scenario, seed=seed)
     curve_path.write_text(json.dumps({"job": {k: v for k, v in job.items() if k not in ("out_dir", "models_dir")},
+                                      "cost_table": {"source": costs.source, "fingerprint": costs.fingerprint},
                                       "config": asdict(mcfg), "curve": curve, "selected_steps": best["steps"],
                                       "selected_val_return": best["return"], "seconds": round(time.time() - t0, 1)},
                                      indent=1), encoding="utf-8")
@@ -135,6 +136,10 @@ def evaluate_learned(scenario: str, algo: str, seeds: Sequence[int], out_dir: Pa
     from .agents.mappo import load_actor
     per_seed = []
     for seed in seeds:
+        trained_on = (run_info(out_dir, scenario, algo, seed, name) or {}).get("cost_table", {})
+        if trained_on and trained_on["fingerprint"] != costs.fingerprint:
+            raise ValueError(f"{name}/{scenario}/{algo}/seed{seed} was trained on cost table {trained_on['source']} "
+                             f"({trained_on['fingerprint']}), not on {costs.source} ({costs.fingerprint})")
         _, paths = run_paths(out_dir, models_dir, scenario, algo, seed, name)
         actors = {a: load_actor(p) for a, p in paths.items()}
         dev = (lambda obs, env, m=actors["device"]: m.act(obs["device"]))
@@ -206,7 +211,7 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
         log("[experiment] matplotlib not installed: figures skipped")
     budgets = sorted({r["job"]["steps"] for r in runs}) or [steps]           # what the saved runs were trained with
     overrides = runs[0]["job"].get("mappo", mappo) if runs else mappo
-    report = (f"## {name.replace('_', ' ')}\n\nCost table: `{costs.source}` · {len(seeds)} seeds × "
+    report = (f"## {name.replace('_', ' ')}\n\nCost table: `{costs.source}` ({costs.fingerprint}) · {len(seeds)} seeds × "
               f"{' / '.join(f'{b:,}' for b in budgets)} steps per run · trainer overrides: `{overrides}`\n\n{figure}"
               + "\n\n".join(sections) + "\n")
     (out_dir / f"{name}.md").write_text(report, encoding="utf-8")

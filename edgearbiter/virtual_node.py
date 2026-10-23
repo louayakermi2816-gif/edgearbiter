@@ -153,7 +153,7 @@ class VirtualNode:
                "decision": "timeout" if decision is None else "ok", "loop_rtt_ms": round(rtt_ms, 1),
                "tier": last["tier"], "model": self.env.costs.tiers[last["tier"]]["model"], "where": last["where"],
                "rate_fps": last["rate_fps"], "processed": last["processed"], "latency_ms": round(last["latency_ms"], 1),
-               "deadline_miss": bool(last["violations"]), "rejected": bool(last["rejected"]),
+               "miss_rate": round(last["violations"] / max(1, last["processed"]), 3), "rejected": bool(last["rejected"]),
                "edge_accepting": last["edge_accepting"], "edge_load": round(last["edge_load"], 3),
                "battery": round(self.env.battery, 4), "kpis": info["kpis"]}
         self._publish("node", out)

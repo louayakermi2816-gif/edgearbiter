@@ -15,7 +15,11 @@ sees both observations during training only.
 
 Frames arrive from a bursty workload, are queued on the device (bounded queue,
 drops beyond capacity) and processed either locally or on the edge server.
-Latency, energy and accuracy come from the cost table (`edgearbiter.costs`);
+Latency, energy and accuracy come from the cost table (`edgearbiter.costs`). When the
+table has measured p95 latencies, the inference time of a frame is log-normal through
+the measured median and p95, and deadline misses are counted in expectation (each frame
+misses with the probability that its latency exceeds the deadline); without a p95 the
+latency is deterministic and a configuration either meets the deadline or does not.
 offloading goes through the stochastic link model (RTT + size / bandwidth) and is
 throughput-limited by the uplink bandwidth. The edge also serves background
 tenants: reserving a CPU share for the device while the server is busy slows them
@@ -32,6 +36,7 @@ Episode ends after `horizon` steps or when the battery is empty (penalised).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple
 
@@ -66,6 +71,18 @@ EDGE_OBS = ("edge_load", "offload_request", "offload_frames", "link_good", "link
             "requested_tier", "time")
 
 
+def miss_probability(latency_ms: float, deadline_ms: float, sigma: float = 0.0, fixed_ms: float = 0.0) -> float:
+    """Probability that a frame misses the deadline. `latency_ms` is the median end-to-end latency, of
+    which `fixed_ms` (network) is deterministic and the rest (inference) log-normal with log-spread
+    `sigma`; sigma = 0 is a deterministic latency."""
+    if sigma <= 0.0:
+        return 1.0 if latency_ms > deadline_ms else 0.0
+    budget, compute = deadline_ms - fixed_ms, latency_ms - fixed_ms
+    if budget <= 0.0:
+        return 1.0
+    return 0.5 * math.erfc((math.log(budget) - math.log(compute)) / (sigma * math.sqrt(2.0)))
+
+
 def device_observation(battery: float, queue_frac: float, link_state: int, rtt_ms: float, bandwidth_mbps: float,
                        arrivals: float, violation_rate: float, edge_accepting: float, edge_share: float,
                        t_frac: float) -> np.ndarray:
@@ -98,6 +115,7 @@ class EdgeArbiterEnv:
         self.action_factors = {"device": (self.n_tiers, len(RATES), 2), "edge": (2, len(SHARES))}
         self.observation_spaces = {"device": spaces.Box(0.0, 1.0, shape=(len(DEVICE_OBS),), dtype=np.float32),
                                    "edge": spaces.Box(0.0, 1.0, shape=(len(EDGE_OBS),), dtype=np.float32)}
+        self.sigma = {(t, w): self.costs.latency_sigma(t, w) for t in range(self.n_tiers) for w in ("device", "edge")}
         self.rng = np.random.default_rng()
         self._reset_state()
 
@@ -127,25 +145,28 @@ class EdgeArbiterEnv:
         rejected = 0
         if place == 1 and accept:
             service_ms = costs.latency(tier, "edge") / share * (1.0 + edge_load)
-            latency = self.link.transfer_ms(costs.frame_kb) + service_ms
+            network_ms = self.link.transfer_ms(costs.frame_kb)
+            latency = network_ms + service_ms
             energy_per_frame = costs.tx_energy()
             capacity = max(1, min(int(1000.0 / max(service_ms, 1.0)), self.link.uplink_fps(costs.frame_kb)))
             used_tier, where = tier, "edge"
         elif place == 1 and not accept:                       # rejected -> fall back to the tiny model locally
             rejected = 1
             used_tier, where = 0, "device"
-            latency = costs.latency(0, "device") + self.link.rtt_ms
+            network_ms = self.link.rtt_ms
+            latency = costs.latency(0, "device") + network_ms
             energy_per_frame = costs.energy(0) + 0.1 * costs.tx_energy()
             capacity = max(1, int(1000.0 / max(costs.latency(0, "device"), 1.0)))
         else:
             used_tier, where = tier, "device"
+            network_ms = 0.0
             latency = costs.latency(tier, "device")
             energy_per_frame = costs.energy(tier)
             capacity = max(1, int(1000.0 / max(latency, 1.0)))
 
         processed = min(requested, capacity)
         self.queue -= processed
-        violations = processed if latency > cfg.deadline_ms else 0
+        violations = processed * miss_probability(latency, cfg.deadline_ms, self.sigma[used_tier, where], network_ms)
         energy_mj = processed * energy_per_frame + 2.0            # 2 mJ idle draw
         accuracy_sum = processed * costs.accuracy(used_tier)
         offload_frames = processed if where == "edge" else 0

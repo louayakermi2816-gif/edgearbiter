@@ -26,3 +26,38 @@ def test_build_cost_table_from_benchmark_rows():
     assert table["tiers"][2]["latency_ms"]["device"] == 100.0 and table["tiers"][2]["edge_measured"] is False
     t = CostTable(tiers=table["tiers"])
     assert t.energy(2) > t.energy(0)
+
+
+def test_synthetic_keyword_and_fingerprint(tmp_path):
+    t = CostTable.synthetic(); p = tmp_path / "copy.json"
+    t.save(p)
+    assert CostTable.load("synthetic").source == "synthetic"
+    assert CostTable.load(p).fingerprint == t.fingerprint                      # same numbers, other path
+    changed = CostTable(tiers=[dict(x) for x in t.tiers]); changed.tiers[0]["accuracy"] = 0.5
+    assert changed.fingerprint != t.fingerprint
+
+
+def _row(model, p50, acc, threads=1):
+    return {"model": model, "threads": threads, "latency_ms": {"p50": p50, "p95": 1.1 * p50}, "size_mb": 1.0,
+            "accuracy": acc, "memory_mb": 10.0}
+
+
+def test_deployment_tiers_take_int8_only_when_faster_and_as_accurate():
+    from edgearbiter.benchmark import deployment_tiers
+    rows = [_row("mobilenet_v3_small_imagenette_scratch", 36.0, 0.826),
+            _row("mobilenet_v3_small_imagenette_scratch_int8", 37.0, 0.825),       # slower: FP32
+            _row("mobilenet_v3_large_imagenette_scratch", 58.0, 0.850),
+            _row("mobilenet_v3_large_imagenette_scratch_int8", 48.0, 0.835),       # loses 1.5 pt: FP32
+            _row("resnet18_imagenette_scratch", 112.0, 0.870),
+            _row("resnet18_imagenette_scratch_int8", 33.0, 0.866)]                 # faster, -0.4 pt: INT8
+    tiers, reasons = deployment_tiers(rows)
+    assert tiers == {"tiny": "mobilenet_v3_small_imagenette_scratch", "small": "mobilenet_v3_large_imagenette_scratch",
+                     "medium": "resnet18_imagenette_scratch_int8"} and len(reasons) == 3
+
+
+def test_edge_latency_is_the_fastest_thread_count():
+    device = [_row("m", 40.0, 0.8)]
+    edge = [_row("m", 9.0, 0.8, threads=1), _row("m", 12.0, 0.8, threads=4)]   # small models do not scale with threads
+    tier = build_cost_table(device, edge, tiers={"tiny": "m"}, meta={"note": "x"})
+    assert tier["tiers"][0]["latency_ms"] == {"device": 40.0, "edge": 9.0} and tier["tiers"][0]["edge_threads"] == 1
+    assert tier["tiers"][0]["latency_p95_ms"]["edge"] == 9.9 and tier["meta"] == {"note": "x"}

@@ -9,10 +9,13 @@
     python scripts/run_benchmark.py --merge results/benchmark_device.json results/benchmark_edge.json
 
 No device at hand: emulate it with one thread in a CPU-limited cgroup (Linux, root) and use this
-machine as the edge, then merge (the Imagenette models are trained by finetune_imagenette.py):
-    python scripts/run_benchmark.py --role device --threads 1 --cpu-quota 0.25 --models <...> --tag imagenette
-    python scripts/run_benchmark.py --role edge --threads 4 --models <...> --tag imagenette
-    python scripts/run_benchmark.py --tiers imagenette --merge results/benchmark_device_imagenette.json \
+machine as the edge (each model at its fastest thread count), then merge. The Imagenette models are
+trained by finetune_imagenette.py; `--tiers deployment` picks FP32 or INT8 per architecture
+(benchmark.deployment_tiers):
+    M="mobilenet_v3_small_imagenette_scratch mobilenet_v3_small_imagenette_scratch_int8 ..."
+    python scripts/run_benchmark.py --role device --threads 1 --cpu-quota 0.25 --iters 200 --models $M --tag imagenette
+    python scripts/run_benchmark.py --role edge --threads 1 2 4 --iters 200 --models $M --tag imagenette
+    python scripts/run_benchmark.py --tiers deployment --merge results/benchmark_device_imagenette.json \
         results/benchmark_edge_imagenette.json
 """
 from __future__ import annotations
@@ -22,15 +25,25 @@ import json
 import sys
 from pathlib import Path
 
-from edgearbiter.benchmark import TIER_SETS, benchmark_models, build_cost_table, host_info, markdown_table
+from edgearbiter.benchmark import (TIER_SETS, benchmark_models, build_cost_table, deployment_tiers, host_info,
+                                   markdown_table)
 
 DEFAULT_MODELS = ["mobilenet_v3_small", "mobilenet_v3_large", "mobilenet_v3_large_int8", "resnet18", "resnet18_int8",
                   "efficientnet_b0", "ssdlite320_mobilenet_v3_large"]
 
 
-def load_rows(path: str):
+def load_run(path: str):
+    """Rows and host of a saved benchmark run."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return data["rows"] if isinstance(data, dict) else data
+    return (data["rows"], data.get("host")) if isinstance(data, dict) else (data, None)
+
+
+def tier_models(name: str, device_rows):
+    if name == "deployment":
+        tiers, reasons = deployment_tiers(device_rows)
+        print("tiers (deployment rule):\n  " + "\n  ".join(reasons))
+        return tiers, reasons
+    return TIER_SETS[name], f"fixed tier set {name!r}"
 
 
 def main():
@@ -47,7 +60,8 @@ def main():
     ap.add_argument("--max-batches", type=int, default=None)
     ap.add_argument("--cpu-quota", type=float, default=None,
                     help="emulate a slower device: limit the inference process to this many CPUs (cgroup)")
-    ap.add_argument("--tiers", choices=list(TIER_SETS), default="torchvision", help="models that form the cost table")
+    ap.add_argument("--tiers", choices=[*TIER_SETS, "deployment"], default="torchvision",
+                    help="models that form the cost table (deployment: Imagenette models, FP32 or INT8 by rule)")
     ap.add_argument("--label", default=None, help="free-text host label stored with the results")
     ap.add_argument("--tag", default=None, help="suffix of the output files: benchmark_<role>_<tag>.*")
     ap.add_argument("--out", default="results")
@@ -56,7 +70,12 @@ def main():
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
 
     if args.merge:
-        table = build_cost_table(load_rows(args.merge[0]), load_rows(args.merge[1]), TIER_SETS[args.tiers])
+        (dev_rows, dev_host), (edge_rows, edge_host) = load_run(args.merge[0]), load_run(args.merge[1])
+        tiers, selection = tier_models(args.tiers, dev_rows)
+        table = build_cost_table(dev_rows, edge_rows, tiers, meta={
+            "device": {"benchmark": args.merge[0], "host": dev_host,
+                       "cpu_quota": sorted({r.get("cpu_quota") for r in dev_rows if r.get("cpu_quota")})},
+            "edge": {"benchmark": args.merge[1], "host": edge_host}, "tier_selection": selection})
     else:
         host = host_info(args.label)
         rows = benchmark_models(args.models, role=args.role, iters=args.iters, threads=args.threads,
@@ -69,10 +88,11 @@ def main():
         print(md)
         if args.role != "device" or args.tag:
             return
-        missing = [m for m in TIER_SETS[args.tiers].values() if m not in {r["model"] for r in rows}]
+        tiers, selection = tier_models(args.tiers, rows)
+        missing = [m for m in tiers.values() if m not in {r["model"] for r in rows}]
         if missing:
             print(f"cost table not built: tier models missing from the run: {missing}"); return
-        table = build_cost_table(rows, tiers=TIER_SETS[args.tiers])
+        table = build_cost_table(rows, tiers=tiers, meta={"device": {"host": host}, "tier_selection": selection})
     (out / "cost_table.json").write_text(json.dumps(table, indent=1), encoding="utf-8")
     print(f"\ncost table written to {out}/cost_table.json")
 

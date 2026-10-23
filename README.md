@@ -42,7 +42,7 @@ In development since September 2026. Every number below comes from a file in
 | Part | State |
 |---|---|
 | Simulator, baselines, IPPO / MAPPO, experiment protocol | done, tested (`pytest`, CI) |
-| Multi-seed RL results (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
+| Multi-seed RL results (2 scenarios, 3 seeds) | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
 | Latency / size benchmark, FP32 vs INT8, 1 and 4 threads | measured on a 4-vCPU x86 VM — [results/benchmark_edge.md](results/benchmark_edge.md) |
 | Imagenette training pipeline | validated: MobileNetV3-Small **from scratch 82.6 %** top-1 — [results/finetune_mobilenet_v3_small_scratch.md](results/finetune_mobilenet_v3_small_scratch.md) |
 | Top-1 of the ImageNet-pretrained FP32/INT8 models; fine-tuning from ImageNet | **pending**: needs the torchvision weights (download.pytorch.org) |
@@ -113,7 +113,11 @@ link's RTT plus transfer time and is **throughput-limited by the uplink** (a 40 
 frame at 0.8 Mbps → 2 frames/s). The edge serves background tenants whose load
 follows a bounded random walk; reserving a CPU share for the device while the
 server is busy slows them down. Latency, energy and accuracy come from the cost
-table. Both agents act **simultaneously** each second; the edge's decision is its
+table. With a measured table, the inference time of a frame is **log-normal through
+the measured p50 and p95**, and each frame misses its deadline with the probability
+that its latency exceeds it (counted in expectation, so episodes of different policies
+see the same link and workload); the synthetic table has no p95, and its latencies are
+deterministic. Both agents act **simultaneously** each second; the edge's decision is its
 admission policy for that interval.
 
 | Agent | Observation (local) | Action |
@@ -186,9 +190,9 @@ are **paired** episode by episode against the best static policy, with 95 % CIs.
 
 All learning results below run on the labelled **synthetic cost table** (see Status);
 the full tables with every KPI and the per-seed returns are in
-[results/experiments.md](results/experiments.md).
+[results/experiments_synthetic.md](results/experiments_synthetic.md).
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="results/experiments_learning_curves_dark.png"><img alt="Validation return vs environment steps for PPO, IPPO, MAPPO and MAPPO from scratch in both scenarios" src="results/experiments_learning_curves.png"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="results/experiments_synthetic_learning_curves_dark.png"><img alt="Validation return vs environment steps for PPO, IPPO, MAPPO and MAPPO from scratch in both scenarios" src="results/experiments_synthetic_learning_curves.png"></picture>
 
 Validation return during training (mean over 3 seeds, band ± std); horizontal lines are the
 best static policy and the best heuristic on the same validation episodes.

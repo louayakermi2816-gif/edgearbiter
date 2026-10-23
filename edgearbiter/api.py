@@ -33,7 +33,7 @@ from .mqtt_bridge import Publisher
 from .sim.env import RATES, SHARES, EdgeArbiterEnv, device_observation, edge_observation, edge_rule
 from .sim.link import classify_link
 
-_costs = CostTable.load()
+_costs = CostTable.load(os.environ.get("COST_TABLE"))
 _env = EdgeArbiterEnv(_costs)
 _obs: Optional[Dict[str, np.ndarray]] = None
 _publisher = Publisher()

@@ -1,8 +1,8 @@
-## experiments
+## experiments synthetic
 
-Cost table: `synthetic` · 3 seeds × 1,000,000 steps per run · trainer overrides: `{'gamma': 0.995, 'ent_coef': 0.02, 'ent_coefs': {'edge': 0.001}, 'bc_smoothing': 0.05}`
+Cost table: `synthetic` (3718ae62b18a) · 3 seeds × 1,000,000 steps per run · trainer overrides: `{'gamma': 0.995, 'ent_coef': 0.02, 'ent_coefs': {'edge': 0.001}, 'bc_smoothing': 0.05}`
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="experiments_learning_curves_dark.png"><img alt="Validation return vs training steps" src="experiments_learning_curves.png"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="experiments_synthetic_learning_curves_dark.png"><img alt="Validation return vs training steps" src="experiments_synthetic_learning_curves.png"></picture>
 
 Lines: mean validation return over training seeds (band: ± std); horizontal lines: baselines on the same validation episodes.
 

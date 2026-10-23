@@ -4,7 +4,7 @@ import pytest
 from edgearbiter.baselines import BASELINES, EDGE_BASELINES, deadline_greedy
 from edgearbiter.costs import SYNTHETIC_TIERS, CostTable
 from edgearbiter.evaluate import evaluate, run_episode
-from edgearbiter.sim.env import DEVICE_OBS, EDGE_OBS, RATES, SHARES, EdgeArbiterEnv, SimConfig, edge_rule
+from edgearbiter.sim.env import DEVICE_OBS, EDGE_OBS, RATES, SHARES, EdgeArbiterEnv, SimConfig, edge_rule, miss_probability
 from edgearbiter.sim.link import Link, classify_link, congestion
 
 I = {n: i for i, n in enumerate(DEVICE_OBS)}
@@ -38,6 +38,24 @@ def test_episode_runs_and_is_deterministic():
     b = run_episode(env, BASELINES["rule_based"], edge_rule, seed=3)
     assert a == b
     assert a["processed"] > 0 and 0.0 <= a["violation_rate"] <= 1.0
+
+
+def test_deadline_misses_follow_the_measured_latency_tail():
+    tiers = [dict(t) for t in SYNTHETIC_TIERS]
+    tiers[1] = dict(tiers[1], latency_ms={"device": 80.0, "edge": 7.0}, latency_p95_ms={"device": 120.0, "edge": None})
+    costs = CostTable(tiers=tiers)
+    sigma = costs.latency_sigma(1, "device")
+    assert sigma > 0 and costs.latency_sigma(1, "edge") == 0.0 and costs.latency_sigma(0, "device") == 0.0
+    assert miss_probability(80.0, 120.0, sigma) == pytest.approx(0.05)            # the p95 itself
+    assert 0.05 < miss_probability(80.0, 100.0, sigma) < 0.5
+    assert miss_probability(100.0, 100.0, sigma, fixed_ms=60.0) == pytest.approx(0.5)   # 40 ms median left for compute
+    assert miss_probability(100.0, 50.0, sigma, fixed_ms=60.0) == 1.0              # the network alone is too slow
+    assert miss_probability(80.0, 100.0) == 0.0 and miss_probability(120.0, 100.0) == 1.0   # no tail: deterministic
+    env = EdgeArbiterEnv(costs)
+    env.reset(seed=0); env.queue = 20
+    _, _, _, _, info = env.step({"device": env.encode_device(1, 2, 0), "edge": env.encode_edge(1, 1)})
+    last = info["last"]
+    assert last["processed"] == 10 and last["violations"] == pytest.approx(10 * miss_probability(80.0, 100.0, sigma))
 
 
 def test_offload_uses_edge_and_rejection_falls_back():

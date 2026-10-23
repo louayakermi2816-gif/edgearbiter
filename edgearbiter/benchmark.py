@@ -20,9 +20,12 @@ Models
                        `_int8` variants: post-training static quantisation (FX graph mode, x86
                        engine) calibrated on Imagenette training images (`edgearbiter.quantize`).
 
-Hardware profiles (no device needed): the "edge" is this machine with all its threads; the
-"device" is emulated by one thread in a CPU-bandwidth-limited cgroup (`--cpu-quota 0.25`,
-`edgearbiter.cpulimit`). Both are merged into results/cost_table.json, which drives the simulator.
+Hardware profiles (no device needed): the "edge" is this machine (each model at its fastest
+measured thread count); the "device" is emulated by one thread in a CPU-bandwidth-limited cgroup
+(`--cpu-quota 0.25`, `edgearbiter.cpulimit`). Both are merged into results/cost_table.json, which
+drives the simulator: accuracy, p50 latency (device / edge), p95 latency (the simulator's latency
+tail), energy per inference, size and memory per tier. `deployment_tiers` chooses the tiers among the
+models trained on Imagenette: one per architecture, FP32 or INT8 by a fixed rule.
 """
 from __future__ import annotations
 
@@ -38,7 +41,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -112,9 +115,8 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
     return zoo
 
 
-TIER_SETS["imagenette"] = {"tiny": "mobilenet_v3_small_imagenette_scratch",
-                           "small": "mobilenet_v3_large_imagenette_scratch_int8",
-                           "medium": "resnet18_imagenette_scratch"}
+# architectures of the Imagenette tiers, smallest first (see deployment_tiers)
+LADDER = (("tiny", "mobilenet_v3_small"), ("small", "mobilenet_v3_large"), ("medium", "resnet18"))
 
 
 def set_quant_engine(preferred: Optional[str] = None) -> str:
@@ -282,10 +284,34 @@ def markdown_table(rows: List[Dict], host: Optional[Dict] = None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _pick(rows: List[Dict], model: str) -> Optional[Dict]:
-    """The row of `model` with the most threads (a device uses all its cores)."""
+def _pick(rows: List[Dict], model: str, fastest: bool = False) -> Optional[Dict]:
+    """The row of `model` with the most threads (a device uses all its cores), or with the lowest p50
+    (`fastest`: a server runs each model at its best thread count)."""
     rows = [r for r in rows if r["model"] == model]
-    return max(rows, key=lambda r: r.get("threads") or 0) if rows else None
+    if not rows:
+        return None
+    return min(rows, key=lambda r: r["latency_ms"]["p50"]) if fastest else max(rows, key=lambda r: r.get("threads") or 0)
+
+
+def deployment_tiers(device_rows: List[Dict], init: str = "scratch", max_int8_loss: float = 0.01) -> Tuple[Dict[str, str], List[str]]:
+    """Tiers from the models trained on Imagenette, one per architecture of LADDER: the post-training INT8
+    model when it is faster on the device and loses at most `max_int8_loss` top-1, else the FP32 model.
+    Returns the tier -> model mapping and the reason for each choice."""
+    suffix = "" if init == "imagenet" else f"_{init}"
+    tiers, reasons = {}, []
+    for tier, arch in LADDER:
+        fp, q = _pick(device_rows, f"{arch}_imagenette{suffix}"), _pick(device_rows, f"{arch}_imagenette{suffix}_int8")
+        if fp is None:
+            raise KeyError(f"{arch}_imagenette{suffix} missing from the device benchmark")
+        use = fp
+        if q is not None and fp["accuracy"] is not None and q["accuracy"] is not None:
+            if q["latency_ms"]["p50"] < fp["latency_ms"]["p50"] and fp["accuracy"] - q["accuracy"] <= max_int8_loss:
+                use = q
+            reasons.append(f"{tier}: {arch} {'INT8' if use is q else 'FP32'} (device p50 INT8 {q['latency_ms']['p50']:.1f} "
+                           f"vs FP32 {fp['latency_ms']['p50']:.1f} ms, top-1 {100 * q['accuracy']:.1f} vs "
+                           f"{100 * fp['accuracy']:.1f} %)")
+        tiers[tier] = use["model"]
+    return tiers, reasons
 
 
 def _p95(row: Dict) -> Optional[float]:
@@ -293,19 +319,24 @@ def _p95(row: Dict) -> Optional[float]:
     return round(p95, 2) if p95 is not None else None
 
 
-def build_cost_table(device_rows: List[Dict], edge_rows: Optional[List[Dict]] = None, tiers: Dict[str, str] = TIERS) -> Dict:
+def build_cost_table(device_rows: List[Dict], edge_rows: Optional[List[Dict]] = None, tiers: Dict[str, str] = TIERS,
+                     meta: Optional[Dict] = None) -> Dict:
     """Merge device (and optionally edge) measurements into the simulator's cost table."""
     out = []
     for tier, model in tiers.items():
         d = _pick(device_rows, model)
         if d is None:
             raise KeyError(f"tier model {model!r} missing from the device benchmark")
-        e = _pick(edge_rows or [], model)
+        e = _pick(edge_rows or [], model, fastest=True)
         dev_lat = d["latency_ms"]["p50"]
         edge_lat = e["latency_ms"]["p50"] if e else dev_lat / 8.0      # no edge run yet: assume an 8x faster server
         out.append({"name": tier, "model": model, "accuracy": d["accuracy"],
                     "latency_ms": {"device": round(dev_lat, 2), "edge": round(edge_lat, 2)},
                     "latency_p95_ms": {"device": _p95(d), "edge": _p95(e) if e else None},
                     "energy_mj": round(dev_lat * ENERGY_MJ_PER_MS, 2), "size_mb": d["size_mb"],
-                    "memory_mb": d.get("memory_mb"), "edge_measured": e is not None})
-    return {"tiers": out, "frame_kb": 40.0, "tx_energy_mj_per_kb": 0.25, "source": "benchmark"}
+                    "memory_mb": d.get("memory_mb"), "edge_measured": e is not None,
+                    "edge_threads": e.get("threads") if e else None})
+    table = {"tiers": out, "frame_kb": 40.0, "tx_energy_mj_per_kb": 0.25, "source": "benchmark"}
+    if meta:
+        table["meta"] = meta
+    return table
