@@ -26,11 +26,12 @@ def main():
     ap.add_argument("--algo", choices=list(ALGOS), default="ppo")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--episodes", type=int, default=20)
+    ap.add_argument("--name", default="experiments", help="study name given to run_experiments.py")
     ap.add_argument("--out", default="results")
     ap.add_argument("--models", default="models")
     ap.add_argument("--cost-table", default=None)
     args = ap.parse_args()
-    _, paths = run_paths(Path(args.out), Path(args.models), args.scenario, args.algo, args.seed)
+    _, paths = run_paths(Path(args.out), Path(args.models), args.scenario, args.algo, args.seed, args.name)
     actors = {a: load_actor(p) for a, p in paths.items()}
     env = EdgeArbiterEnv(CostTable.load(args.cost_table), SCENARIOS[args.scenario])
     tiers = [t["name"] for t in env.costs.tiers]

@@ -1,13 +1,910 @@
 [
-  {"id": "ea_tab", "type": "tab", "label": "EdgeArbiter", "disabled": false, "info": "ESP32 telemetry -> EdgeArbiter API decision (device + edge agents) -> back to the device over MQTT; the live choice is shown as node status. Simulator KPIs arrive on edgearbiter/sim."},
-  {"id": "ea_broker", "type": "mqtt-broker", "name": "mosquitto", "broker": "mosquitto", "port": "1883", "clientid": "", "autoConnect": true, "usetls": false, "protocolVersion": "4", "keepalive": "60", "cleansession": true},
-  {"id": "ea_in_tel", "type": "mqtt in", "z": "ea_tab", "name": "edgearbiter/telemetry", "topic": "edgearbiter/telemetry", "qos": "0", "datatype": "json", "broker": "ea_broker", "x": 150, "y": 80, "wires": [["ea_prep"]]},
-  {"id": "ea_prep", "type": "function", "z": "ea_tab", "name": "telemetry -> /policy/decide body", "func": "const t = msg.payload;\nmsg.payload = {battery: t.battery ?? 1, queue: t.queue ?? 0, rtt_ms: t.rtt_ms ?? 20, bandwidth_mbps: t.bandwidth_mbps ?? 20, arrivals: t.arrivals ?? 0, edge_load: t.edge_load ?? flow.get('edge_load') ?? 0.3};\nmsg.headers = {'Content-Type': 'application/json'};\nreturn msg;", "outputs": 1, "x": 420, "y": 80, "wires": [["ea_http"]]},
-  {"id": "ea_http", "type": "http request", "z": "ea_tab", "name": "POST api:8000/policy/decide", "method": "POST", "ret": "obj", "url": "http://api:8000/policy/decide", "x": 700, "y": 80, "wires": [["ea_out_dec", "ea_dbg_dec", "ea_show_dec"]]},
-  {"id": "ea_out_dec", "type": "mqtt out", "z": "ea_tab", "name": "edgearbiter/decision", "topic": "edgearbiter/decision", "qos": "0", "retain": "false", "broker": "ea_broker", "x": 960, "y": 60, "wires": []},
-  {"id": "ea_dbg_dec", "type": "debug", "z": "ea_tab", "name": "decision", "active": true, "tosidebar": true, "complete": "payload", "x": 940, "y": 100, "wires": []},
-  {"id": "ea_show_dec", "type": "function", "z": "ea_tab", "name": "live decision", "func": "const d = msg.payload;\nconst where = d.placement === 'edge' ? `edge, share ${d.edge_share}` : 'local';\nnode.status({fill: d.rejected ? 'yellow' : (d.placement === 'edge' ? 'blue' : 'green'), shape: 'dot', text: `${d.model} @ ${d.rate_fps} fps (${where})${d.rejected ? ' - offload rejected' : ''}`});\nreturn null;", "outputs": 1, "x": 950, "y": 140, "wires": [[]]},
-  {"id": "ea_in_sim", "type": "mqtt in", "z": "ea_tab", "name": "edgearbiter/sim", "topic": "edgearbiter/sim", "qos": "0", "datatype": "json", "broker": "ea_broker", "x": 130, "y": 240, "wires": [["ea_kpi"]]},
-  {"id": "ea_kpi", "type": "function", "z": "ea_tab", "name": "sim KPIs", "func": "const k = msg.payload.kpis, l = msg.payload.last;\nflow.set('edge_load', l.edge_load);\nmsg.payload = {t: k.t, battery: k.battery, mean_accuracy: k.mean_accuracy, violation_rate: k.violation_rate, energy_j: k.energy_j, processed: k.processed, dropped: k.dropped, edge_cost: k.edge_cost, tier: l.tier, where: l.where, edge_accepting: l.edge_accepting, latency_ms: +l.latency_ms.toFixed(1)};\nnode.status({fill: 'grey', shape: 'ring', text: `t=${k.t}s acc ${k.mean_accuracy} viol ${k.violation_rate} battery ${k.battery}`});\nreturn msg;", "outputs": 1, "x": 340, "y": 240, "wires": [["ea_dbg_sim"]]},
-  {"id": "ea_dbg_sim", "type": "debug", "z": "ea_tab", "name": "sim KPIs", "active": true, "tosidebar": true, "complete": "payload", "x": 560, "y": 240, "wires": []}
+ {
+  "id": "ea_tab",
+  "type": "tab",
+  "label": "EdgeArbiter",
+  "disabled": false,
+  "info": "IoT loop in software: the (virtual) ESP32 node publishes telemetry -> this flow calls the EdgeArbiter policy service (device + edge agents) -> the decision goes back to the node over MQTT. The dashboard at /dashboard shows the live decision and KPIs. Environment: MQTT_HOST (broker), API_URL (policy service)."
+ },
+ {
+  "id": "ea_broker",
+  "type": "mqtt-broker",
+  "name": "broker",
+  "broker": "${MQTT_HOST}",
+  "port": "1883",
+  "clientid": "",
+  "autoConnect": true,
+  "usetls": false,
+  "protocolVersion": "4",
+  "keepalive": "60",
+  "cleansession": true,
+  "autoUnsubscribe": true
+ },
+ {
+  "id": "ea_ui",
+  "type": "ui-base",
+  "name": "EdgeArbiter",
+  "path": "/dashboard",
+  "appIcon": "",
+  "includeClientData": true,
+  "acceptsClientConfig": [
+   "ui-notification",
+   "ui-control"
+  ],
+  "showPathInSidebar": false,
+  "headerContent": "page",
+  "navigationStyle": "default",
+  "titleBarStyle": "default",
+  "showReconnectNotification": true,
+  "notificationDisplayTime": 1,
+  "showDisconnectNotification": true,
+  "allowInstall": false
+ },
+ {
+  "id": "ea_theme",
+  "type": "ui-theme",
+  "name": "EdgeArbiter",
+  "colors": {
+   "surface": "#fcfcfb",
+   "primary": "#2a78d6",
+   "bgPage": "#f9f9f7",
+   "groupBg": "#ffffff",
+   "groupOutline": "#e1e0d9"
+  },
+  "sizes": {
+   "density": "default",
+   "pagePadding": "12px",
+   "groupGap": "12px",
+   "groupBorderRadius": "4px",
+   "widgetGap": "12px"
+  }
+ },
+ {
+  "id": "ea_page",
+  "type": "ui-page",
+  "name": "EdgeArbiter board",
+  "ui": "ea_ui",
+  "path": "/edgearbiter",
+  "icon": "chip",
+  "layout": "grid",
+  "theme": "ea_theme",
+  "breakpoints": [
+   {
+    "name": "Default",
+    "px": 0,
+    "cols": 3
+   },
+   {
+    "name": "Tablet",
+    "px": 576,
+    "cols": 6
+   },
+   {
+    "name": "Small Desktop",
+    "px": 768,
+    "cols": 9
+   },
+   {
+    "name": "Desktop",
+    "px": 1024,
+    "cols": 12
+   }
+  ],
+  "order": 1,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ea_g_decision",
+  "type": "ui-group",
+  "name": "Live decision",
+  "page": "ea_page",
+  "width": 4,
+  "height": 1,
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ea_g_device",
+  "type": "ui-group",
+  "name": "Device and edge",
+  "page": "ea_page",
+  "width": 4,
+  "height": 1,
+  "order": 2,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ea_g_kpi",
+  "type": "ui-group",
+  "name": "Episode KPIs",
+  "page": "ea_page",
+  "width": 4,
+  "height": 1,
+  "order": 3,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ea_g_latency",
+  "type": "ui-group",
+  "name": "Inference latency vs deadline",
+  "page": "ea_page",
+  "width": 6,
+  "height": 1,
+  "order": 4,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ea_g_tier",
+  "type": "ui-group",
+  "name": "Model tier over time",
+  "page": "ea_page",
+  "width": 6,
+  "height": 1,
+  "order": 5,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ea_in_tel",
+  "type": "mqtt in",
+  "z": "ea_tab",
+  "name": "telemetry",
+  "topic": "edgearbiter/telemetry",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "ea_broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 130,
+  "y": 80,
+  "wires": [
+   [
+    "ea_prep"
+   ]
+  ]
+ },
+ {
+  "id": "ea_prep",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "telemetry -> /policy/decide",
+  "outputs": 1,
+  "func": "const t = msg.payload;\nmsg.seq = t.seq;\nmsg.payload = {battery: t.battery ?? 1, queue: t.queue ?? 0, rtt_ms: t.rtt_ms ?? 20,\n    bandwidth_mbps: t.bandwidth_mbps ?? 20, arrivals: t.arrivals ?? 0, violation_rate: t.violation_rate ?? 0,\n    t_fraction: t.t_fraction ?? 0, edge_load: t.edge_load ?? flow.get('edge_load') ?? 0.3};\nmsg.headers = {'Content-Type': 'application/json'};\nmsg.url = (env.get('API_URL') || 'http://api:8000') + '/policy/decide';\nreturn msg;",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 360,
+  "y": 80,
+  "wires": [
+   [
+    "ea_http"
+   ]
+  ]
+ },
+ {
+  "id": "ea_http",
+  "type": "http request",
+  "z": "ea_tab",
+  "name": "POST /policy/decide",
+  "method": "POST",
+  "ret": "obj",
+  "paytoqs": "ignore",
+  "url": "",
+  "tls": "",
+  "persist": false,
+  "proxy": "",
+  "insecureHTTPParser": false,
+  "authType": "",
+  "senderr": false,
+  "headers": [],
+  "x": 610,
+  "y": 80,
+  "wires": [
+   [
+    "ea_seq"
+   ]
+  ]
+ },
+ {
+  "id": "ea_seq",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "answer the same seq",
+  "outputs": 1,
+  "func": "if (msg.statusCode !== 200) { node.warn(`policy service: HTTP ${msg.statusCode}`); return null; }\nmsg.payload.seq = msg.seq;\nreturn msg;",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 830,
+  "y": 80,
+  "wires": [
+   [
+    "ea_out_dec",
+    "ea_show_dec"
+   ]
+  ]
+ },
+ {
+  "id": "ea_out_dec",
+  "type": "mqtt out",
+  "z": "ea_tab",
+  "name": "decision",
+  "topic": "edgearbiter/decision",
+  "qos": "0",
+  "retain": "false",
+  "respTopic": "",
+  "contentType": "",
+  "userProps": "",
+  "correl": "",
+  "expiry": "",
+  "broker": "ea_broker",
+  "x": 1040,
+  "y": 60,
+  "wires": []
+ },
+ {
+  "id": "ea_in_edge",
+  "type": "mqtt in",
+  "z": "ea_tab",
+  "name": "edge host load",
+  "topic": "edgearbiter/edge",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "ea_broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 140,
+  "y": 140,
+  "wires": [
+   [
+    "ea_edge_load"
+   ]
+  ]
+ },
+ {
+  "id": "ea_edge_load",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "remember edge load",
+  "outputs": 1,
+  "func": "flow.set('edge_load', msg.payload.edge_load);\nreturn null;",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 370,
+  "y": 140,
+  "wires": [
+   []
+  ]
+ },
+ {
+  "id": "ea_show_dec",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "live decision",
+  "outputs": 4,
+  "func": "const d = msg.payload;\nconst where = d.placement === 'edge' ? `edge (CPU share ${d.edge_share})` : 'on device';\nnode.status({fill: d.rejected ? 'yellow' : (d.placement === 'edge' ? 'blue' : 'green'), shape: 'dot',\n    text: `${d.model} @ ${d.rate_fps} fps, ${where}${d.rejected ? ' - offload rejected' : ''}`});\nconst policy = d.policy ? `device: ${d.policy.device}, edge: ${d.policy.edge}` : '';\nreturn [{payload: d.model}, {payload: where + (d.rejected ? ' (offload rejected)' : '')},\n        {payload: `${d.rate_fps} fps`}, {payload: (d.edge_accept ? `admitting, share ${d.edge_share}` : 'not admitting')\n        + (policy ? ` - ${policy}` : '')}];",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 1040,
+  "y": 140,
+  "wires": [
+   [
+    "ea_t_model"
+   ],
+   [
+    "ea_t_where"
+   ],
+   [
+    "ea_t_rate"
+   ],
+   [
+    "ea_t_edge"
+   ]
+  ]
+ },
+ {
+  "id": "ea_t_model",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_decision",
+  "order": 1,
+  "width": 0,
+  "height": 0,
+  "name": "Model",
+  "label": "Model",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 1290,
+  "y": 100,
+  "wires": []
+ },
+ {
+  "id": "ea_t_where",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_decision",
+  "order": 2,
+  "width": 0,
+  "height": 0,
+  "name": "Placement",
+  "label": "Placement",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 1290,
+  "y": 140,
+  "wires": []
+ },
+ {
+  "id": "ea_t_rate",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_decision",
+  "order": 3,
+  "width": 0,
+  "height": 0,
+  "name": "Sensing rate",
+  "label": "Sensing rate",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 1290,
+  "y": 180,
+  "wires": []
+ },
+ {
+  "id": "ea_t_edge",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_decision",
+  "order": 4,
+  "width": 0,
+  "height": 0,
+  "name": "Edge",
+  "label": "Edge",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 1290,
+  "y": 220,
+  "wires": []
+ },
+ {
+  "id": "ea_in_node",
+  "type": "mqtt in",
+  "z": "ea_tab",
+  "name": "node outcome",
+  "topic": "edgearbiter/node",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "ea_broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 130,
+  "y": 320,
+  "wires": [
+   [
+    "ea_kpi"
+   ]
+  ]
+ },
+ {
+  "id": "ea_kpi",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "split outcome",
+  "outputs": 10,
+  "func": "const o = msg.payload, k = o.kpis;\nconst tierNames = ['tiny', 'small', 'medium'];\nreturn [\n  {payload: Math.round(100 * o.battery)},\n  {payload: Math.round(100 * o.edge_load)},\n  {payload: `${(100 * k.mean_accuracy).toFixed(1)} %`},\n  {payload: `${(100 * k.violation_rate).toFixed(1)} %`},\n  {payload: `${k.energy_j.toFixed(1)} J`},\n  {payload: `${k.offloaded} offloaded / ${k.processed} processed`},\n  {payload: `${o.loop_rtt_ms} ms`},\n  o.processed ? [{topic: 'latency', payload: o.latency_ms}, {topic: 'deadline', payload: 100}] : null,\n  {topic: 'model tier', payload: o.tier},\n  {payload: `episode ${o.episode}, t = ${o.t} s, return ${k.return}`}\n];",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 340,
+  "y": 320,
+  "wires": [
+   [
+    "ea_g_bat"
+   ],
+   [
+    "ea_g_edge"
+   ],
+   [
+    "ea_t_acc"
+   ],
+   [
+    "ea_t_miss"
+   ],
+   [
+    "ea_t_energy"
+   ],
+   [
+    "ea_t_off"
+   ],
+   [
+    "ea_t_rtt"
+   ],
+   [
+    "ea_c_lat"
+   ],
+   [
+    "ea_c_tier"
+   ],
+   [
+    "ea_t_ep"
+   ]
+  ]
+ },
+ {
+  "id": "ea_g_bat",
+  "type": "ui-gauge",
+  "z": "ea_tab",
+  "name": "Energy budget left",
+  "group": "ea_g_device",
+  "order": 1,
+  "value": "payload",
+  "valueType": "msg",
+  "width": 2,
+  "height": 3,
+  "gtype": "gauge-half",
+  "gstyle": "rounded",
+  "title": "Energy budget left",
+  "alwaysShowTitle": false,
+  "floatingTitlePosition": "top-left",
+  "units": "%",
+  "icon": "",
+  "prefix": "",
+  "suffix": "",
+  "segments": [
+   {
+    "from": "0",
+    "color": "#e34948"
+   },
+   {
+    "from": "20",
+    "color": "#eda100"
+   },
+   {
+    "from": "50",
+    "color": "#1baf7a"
+   }
+  ],
+  "min": 0,
+  "max": 100,
+  "sizeThickness": 16,
+  "sizeGap": 4,
+  "sizeKeyThickness": 8,
+  "styleRounded": true,
+  "styleGlow": false,
+  "className": "",
+  "x": 600,
+  "y": 260,
+  "wires": []
+ },
+ {
+  "id": "ea_g_edge",
+  "type": "ui-gauge",
+  "z": "ea_tab",
+  "name": "Edge server load",
+  "group": "ea_g_device",
+  "order": 2,
+  "value": "payload",
+  "valueType": "msg",
+  "width": 2,
+  "height": 3,
+  "gtype": "gauge-half",
+  "gstyle": "rounded",
+  "title": "Edge server load",
+  "alwaysShowTitle": false,
+  "floatingTitlePosition": "top-left",
+  "units": "%",
+  "icon": "",
+  "prefix": "",
+  "suffix": "",
+  "segments": [
+   {
+    "from": "0",
+    "color": "#1baf7a"
+   },
+   {
+    "from": "50",
+    "color": "#eda100"
+   },
+   {
+    "from": "70",
+    "color": "#e34948"
+   }
+  ],
+  "min": 0,
+  "max": 100,
+  "sizeThickness": 16,
+  "sizeGap": 4,
+  "sizeKeyThickness": 8,
+  "styleRounded": true,
+  "styleGlow": false,
+  "className": "",
+  "x": 600,
+  "y": 300,
+  "wires": []
+ },
+ {
+  "id": "ea_t_acc",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 1,
+  "width": 0,
+  "height": 0,
+  "name": "Mean accuracy",
+  "label": "Mean accuracy",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 610,
+  "y": 340,
+  "wires": []
+ },
+ {
+  "id": "ea_t_miss",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 2,
+  "width": 0,
+  "height": 0,
+  "name": "Deadline misses",
+  "label": "Deadline misses",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 610,
+  "y": 380,
+  "wires": []
+ },
+ {
+  "id": "ea_t_energy",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 3,
+  "width": 0,
+  "height": 0,
+  "name": "Energy used",
+  "label": "Energy used",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 600,
+  "y": 420,
+  "wires": []
+ },
+ {
+  "id": "ea_t_off",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 4,
+  "width": 0,
+  "height": 0,
+  "name": "Frames",
+  "label": "Frames",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 590,
+  "y": 460,
+  "wires": []
+ },
+ {
+  "id": "ea_t_rtt",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 5,
+  "width": 0,
+  "height": 0,
+  "name": "Control-loop round trip",
+  "label": "Control-loop round trip",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 630,
+  "y": 500,
+  "wires": []
+ },
+ {
+  "id": "ea_c_lat",
+  "type": "ui-chart",
+  "z": "ea_tab",
+  "group": "ea_g_latency",
+  "name": "Latency per interval (ms)",
+  "label": "Latency per interval (ms)",
+  "order": 1,
+  "chartType": "line",
+  "category": "topic",
+  "categoryType": "msg",
+  "xAxisLabel": "",
+  "xAxisProperty": "",
+  "xAxisPropertyType": "timestamp",
+  "xAxisType": "time",
+  "xAxisFormat": "",
+  "xAxisFormatType": "auto",
+  "xmin": "",
+  "xmax": "",
+  "yAxisLabel": "ms",
+  "yAxisProperty": "payload",
+  "yAxisPropertyType": "msg",
+  "ymin": "0",
+  "ymax": "",
+  "bins": 10,
+  "action": "append",
+  "stackSeries": false,
+  "pointShape": "false",
+  "pointRadius": 4,
+  "showLegend": true,
+  "removeOlder": 2,
+  "removeOlderUnit": "60",
+  "removeOlderPoints": "300",
+  "colors": [
+   "#2a78d6",
+   "#898781",
+   "#eb6834",
+   "#1baf7a",
+   "#eda100",
+   "#6250d6",
+   "#e34948",
+   "#008300",
+   "#e87ba4"
+  ],
+  "textColor": [
+   "#666666"
+  ],
+  "textColorDefault": true,
+  "gridColor": [
+   "#e5e5e5"
+  ],
+  "gridColorDefault": true,
+  "width": 6,
+  "height": 6,
+  "className": "",
+  "interpolation": "linear",
+  "x": 640,
+  "y": 540,
+  "wires": [
+   []
+  ]
+ },
+ {
+  "id": "ea_c_tier",
+  "type": "ui-chart",
+  "z": "ea_tab",
+  "group": "ea_g_tier",
+  "name": "0 tiny, 1 small, 2 medium (offloaded frames use the edge)",
+  "label": "0 tiny, 1 small, 2 medium (offloaded frames use the edge)",
+  "order": 1,
+  "chartType": "line",
+  "category": "topic",
+  "categoryType": "msg",
+  "xAxisLabel": "",
+  "xAxisProperty": "",
+  "xAxisPropertyType": "timestamp",
+  "xAxisType": "time",
+  "xAxisFormat": "",
+  "xAxisFormatType": "auto",
+  "xmin": "",
+  "xmax": "",
+  "yAxisLabel": "tier",
+  "yAxisProperty": "payload",
+  "yAxisPropertyType": "msg",
+  "ymin": "0",
+  "ymax": "2",
+  "bins": 10,
+  "action": "append",
+  "stackSeries": false,
+  "pointShape": "false",
+  "pointRadius": 4,
+  "showLegend": true,
+  "removeOlder": 2,
+  "removeOlderUnit": "60",
+  "removeOlderPoints": "300",
+  "colors": [
+   "#2a78d6",
+   "#898781",
+   "#eb6834",
+   "#1baf7a",
+   "#eda100",
+   "#6250d6",
+   "#e34948",
+   "#008300",
+   "#e87ba4"
+  ],
+  "textColor": [
+   "#666666"
+  ],
+  "textColorDefault": true,
+  "gridColor": [
+   "#e5e5e5"
+  ],
+  "gridColorDefault": true,
+  "width": 6,
+  "height": 6,
+  "className": "",
+  "interpolation": "step",
+  "x": 640,
+  "y": 580,
+  "wires": [
+   []
+  ]
+ },
+ {
+  "id": "ea_t_ep",
+  "type": "ui-text",
+  "z": "ea_tab",
+  "group": "ea_g_kpi",
+  "order": 6,
+  "width": 0,
+  "height": 0,
+  "name": "Episode",
+  "label": "Episode",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#52514e",
+  "wrapText": false,
+  "className": "",
+  "value": "payload",
+  "valueType": "msg",
+  "x": 590,
+  "y": 620,
+  "wires": []
+ },
+ {
+  "id": "ea_in_sim",
+  "type": "mqtt in",
+  "z": "ea_tab",
+  "name": "api simulator",
+  "topic": "edgearbiter/sim",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "ea_broker",
+  "nl": false,
+  "rap": true,
+  "rh": 0,
+  "inputs": 0,
+  "x": 130,
+  "y": 700,
+  "wires": [
+   [
+    "ea_sim"
+   ]
+  ]
+ },
+ {
+  "id": "ea_sim",
+  "type": "function",
+  "z": "ea_tab",
+  "name": "sim KPIs",
+  "outputs": 1,
+  "func": "const k = msg.payload.kpis, l = msg.payload.last;\nnode.status({fill: 'grey', shape: 'ring', text: `t=${k.t}s acc ${k.mean_accuracy} viol ${k.violation_rate} battery ${k.battery}`});\nmsg.payload = {t: k.t, battery: k.battery, mean_accuracy: k.mean_accuracy, violation_rate: k.violation_rate,\n    energy_j: k.energy_j, edge_cost: k.edge_cost, tier: l.tier, where: l.where, latency_ms: +l.latency_ms.toFixed(1)};\nreturn msg;",
+  "initialize": "",
+  "finalize": "",
+  "libs": [],
+  "x": 330,
+  "y": 700,
+  "wires": [
+   [
+    "ea_dbg_sim"
+   ]
+  ]
+ },
+ {
+  "id": "ea_dbg_sim",
+  "type": "debug",
+  "z": "ea_tab",
+  "name": "sim KPIs",
+  "active": false,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": false,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 520,
+  "y": 700,
+  "wires": []
+ }
 ]

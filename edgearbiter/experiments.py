@@ -71,9 +71,10 @@ def evaluate_baselines(costs: CostTable, cfg: SimConfig, n_episodes: int = 20, b
 
 
 # ------------------------------------------------------------------ training runs
-def run_paths(out_dir: Path, models_dir: Path, scenario: str, algo: str, seed: int):
-    return (Path(out_dir) / "runs" / scenario / f"{algo}_seed{seed}.json",
-            {a: Path(models_dir) / scenario / f"{algo}_seed{seed}_{a}.pt" for a in ALGOS[algo][0]})
+def run_paths(out_dir: Path, models_dir: Path, scenario: str, algo: str, seed: int, name: str = "experiments"):
+    """Learning-curve record and actor checkpoints of one run, namespaced by study `name`."""
+    return (Path(out_dir) / "runs" / name / scenario / f"{algo}_seed{seed}.json",
+            {a: Path(models_dir) / name / scenario / f"{algo}_seed{seed}_{a}.pt" for a in ALGOS[algo][0]})
 
 
 def train_run(job: dict) -> dict:
@@ -107,7 +108,7 @@ def train_run(job: dict) -> dict:
     if best["state"] is not None:
         for a, m in actors.items():
             m.load_state_dict(best["state"][a])
-    curve_path, actor_paths = run_paths(job["out_dir"], job["models_dir"], scenario, algo, seed)
+    curve_path, actor_paths = run_paths(job["out_dir"], job["models_dir"], scenario, algo, seed, job.get("name", "experiments"))
     curve_path.parent.mkdir(parents=True, exist_ok=True)
     for a, path in actor_paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,12 +130,12 @@ def run_jobs(jobs: Sequence[dict], workers: int = 1) -> List[dict]:
 
 
 def evaluate_learned(scenario: str, algo: str, seeds: Sequence[int], out_dir: Path, models_dir: Path,
-                     costs: CostTable, n_episodes: int = 20) -> Tuple[Dict[str, np.ndarray], List[float]]:
+                     costs: CostTable, n_episodes: int = 20, name: str = "experiments") -> Tuple[Dict[str, np.ndarray], List[float]]:
     """Test-episode KPIs of one learned method, concatenated over its training seeds."""
     from .agents.mappo import load_actor
     per_seed = []
     for seed in seeds:
-        _, paths = run_paths(out_dir, models_dir, scenario, algo, seed)
+        _, paths = run_paths(out_dir, models_dir, scenario, algo, seed, name)
         actors = {a: load_actor(p) for a, p in paths.items()}
         dev = (lambda obs, env, m=actors["device"]: m.act(obs["device"]))
         edge = (lambda obs, env, m=actors["edge"]: m.act(obs["edge"])) if "edge" in actors else edge_rule
@@ -162,7 +163,7 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
     mappo = dict(DEFAULT_MAPPO if mappo is None else mappo)
     costs = CostTable.load(cost_table)
     if train:
-        jobs = [{"scenario": s, "algo": a, "seed": k, "steps": steps, "eval_every": eval_every, "mappo": mappo,
+        jobs = [{"name": name, "scenario": s, "algo": a, "seed": k, "steps": steps, "eval_every": eval_every, "mappo": mappo,
                  "cost_table": cost_table, "out_dir": str(out_dir), "models_dir": str(models_dir)}
                 for s in scenarios for a in algos for k in seeds]
         log(f"[experiment] {len(jobs)} training runs on {workers} worker(s)")
@@ -175,9 +176,9 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
         ref = next(n for n in results if n.startswith("best static"))
         seed_rows = []
         for a in algos:
-            res, per_seed = evaluate_learned(s, a, seeds, out_dir, models_dir, costs, n_episodes)
+            res, per_seed = evaluate_learned(s, a, seeds, out_dir, models_dir, costs, n_episodes, name)
             results[LABELS[a]] = res
-            info = [run_info(out_dir, s, a, k) or {} for k in seeds]
+            info = [run_info(out_dir, s, a, k, name) or {} for k in seeds]
             runs += [i for i in info if i]
             seed_rows.append(f"| {LABELS[a]} | " + " | ".join(
                 f"{m:.1f} (checkpoint {i.get('selected_steps', 0) / 1e3:.0f}k)" for m, i in zip(per_seed, info)) + " |")
@@ -190,7 +191,7 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
                           + "\n" + "\n".join(seed_rows))
         sections.append(f"{header}\n\n{summarize(results, ref)}\n\nTest return per training seed (step of the selected "
                         f"checkpoint):\n\n{per_seed_table}")
-        curves[s] = {a: load_curves(out_dir, s, a, seeds) for a in algos}
+        curves[s] = {a: load_curves(out_dir, s, a, seeds, name) for a in algos}
         refs[s] = validation_references(costs, cfg, best=best)
     figure = ""
     try:
@@ -212,17 +213,17 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
     return report
 
 
-def run_info(out_dir: Path, scenario: str, algo: str, seed: int) -> Optional[dict]:
+def run_info(out_dir: Path, scenario: str, algo: str, seed: int, name: str = "experiments") -> Optional[dict]:
     """The saved record of one training run (job, config, learning curve, selected checkpoint)."""
-    path, _ = run_paths(out_dir, Path("."), scenario, algo, seed)
+    path, _ = run_paths(out_dir, Path("."), scenario, algo, seed, name)
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
-def load_curves(out_dir: Path, scenario: str, algo: str, seeds: Sequence[int]) -> Optional[dict]:
+def load_curves(out_dir: Path, scenario: str, algo: str, seeds: Sequence[int], name: str = "experiments") -> Optional[dict]:
     """Validation learning curve (mean / std over seeds) of one method."""
     curves = []
     for seed in seeds:
-        path, _ = run_paths(out_dir, Path("."), scenario, algo, seed)
+        path, _ = run_paths(out_dir, Path("."), scenario, algo, seed, name)
         if path.exists():
             curves.append(json.loads(path.read_text(encoding="utf-8"))["curve"])
     if not curves:

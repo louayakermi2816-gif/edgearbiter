@@ -138,6 +138,7 @@
   "threads": 2,
   "seed": 0,
   "out_dir": "models",
-  "max_batches": null
+  "max_batches": null,
+  "arch": "mobilenet_v3_small"
  }
 }

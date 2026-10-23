@@ -16,7 +16,7 @@ def test_train_from_scratch_on_fake_data(tmp_path):
     cfg = FinetuneConfig(epochs=2, img=64, pretrained=False, out_dir=str(tmp_path))
     metrics = train(build_model(pretrained=False), loader, loader, cfg, log=None)
     ckpt = checkpoint_path(str(tmp_path), "scratch")
-    assert ckpt.name == "mobilenetv3_small_imagenette_scratch.pt" and ckpt.exists()
+    assert ckpt.name == "mobilenet_v3_small_imagenette_scratch.pt" and ckpt.exists()
     assert read_metrics(ckpt)["init"] == "scratch" and len(metrics["history"]) == 2
     assert 0.0 <= metrics["best_val_top1"] <= 1.0
     model = build_model(pretrained=False); model.load_state_dict(torch.load(ckpt))

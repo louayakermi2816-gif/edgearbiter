@@ -26,7 +26,7 @@ def test_run_experiment_writes_tables_curves_and_actors(tmp_path):
         assert (out / f).exists(), f
     table = json.loads((out / "smoke_default.json").read_text())
     assert len(table["PPO (device, edge rule)"]["return"]) == 2
-    assert (models / "default" / "ppo_seed0_device.pt").exists()
-    curve = load_curves(out, "default", "ppo", [0])
+    assert (models / "smoke" / "default" / "ppo_seed0_device.pt").exists()
+    curve = load_curves(out, "default", "ppo", [0], "smoke")
     assert curve["n_seeds"] == 1 and len(curve["steps"]) == 2
     assert set(SCENARIOS) == {"default", "energy_constrained"}

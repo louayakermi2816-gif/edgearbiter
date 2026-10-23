@@ -44,8 +44,36 @@ def test_random_init_int8_runs_on_its_calibration_engine():
 def test_benchmark_rows_and_table():
     rows = benchmark_models(["mobilenet_v3_small"], iters=2, threads=(1, 2), pretrained=False)
     assert [r["threads"] for r in rows] == [1, 2] and all(r["accuracy"] is None and r["weights"] == "random" for r in rows)
+    assert all(r["memory_mb"] > 5 for r in rows)                       # ~10 MB of weights + activations
     md = markdown_table(rows, {"label": None, "cpu": "test-cpu", "logical_cpus": 2, "torch": torch.__version__, "date_utc": "now"})
     assert "Random-init weights" in md and md.count("| mobilenet_v3_small |") == 2
+
+
+def test_post_training_int8_keeps_predictions_and_restores_from_state():
+    import io
+    from edgearbiter.finetune import build_model
+    from edgearbiter.quantize import quantize_ptq
+    model = build_model(pretrained=False, arch="resnet18").eval()
+    calib = [(torch.rand(4, 3, 64, 64), None) for _ in range(3)]
+    q = quantize_ptq(model, calib, batches=3, img=64)
+    x = torch.rand(2, 3, 64, 64)
+    assert q(x).shape == (2, 10) and state_dict_size_mb(q) < state_dict_size_mb(model) / 3
+    buf = io.BytesIO(); torch.save(q.state_dict(), buf); buf.seek(0)
+    fresh = quantize_ptq(build_model(pretrained=False, arch="resnet18").eval(), [(torch.rand(1, 3, 64, 64), None)], batches=1, img=64)
+    fresh.load_state_dict(torch.load(buf, weights_only=False))
+    assert torch.equal(fresh(x), q(x))
+
+
+def test_cpu_limit_slows_the_measurement_down():
+    from edgearbiter.cpulimit import CpuLimit
+    try:
+        limit = CpuLimit(0.25).__enter__()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+    limit.__exit__(None, None, None)
+    free = benchmark_models(["mobilenet_v3_small"], iters=5, threads=(1,), pretrained=False)[0]["latency_ms"]["p50"]
+    slow = benchmark_models(["mobilenet_v3_small"], iters=5, threads=(1,), pretrained=False, cpu_quota=0.25)[0]
+    assert slow["cpu_quota"] == 0.25 and slow["latency_ms"]["p50"] > 2 * free
 
 
 def test_cost_table_uses_the_row_with_most_threads():

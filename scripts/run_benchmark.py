@@ -7,6 +7,13 @@
     python scripts/run_benchmark.py --threads 1 4         # one row per thread count
     python scripts/run_benchmark.py --models mobilenet_v3_small_imagenette_scratch --tag imagenette   # trained model
     python scripts/run_benchmark.py --merge results/benchmark_device.json results/benchmark_edge.json
+
+No device at hand: emulate it with one thread in a CPU-limited cgroup (Linux, root) and use this
+machine as the edge, then merge (the Imagenette models are trained by finetune_imagenette.py):
+    python scripts/run_benchmark.py --role device --threads 1 --cpu-quota 0.25 --models <...> --tag imagenette
+    python scripts/run_benchmark.py --role edge --threads 4 --models <...> --tag imagenette
+    python scripts/run_benchmark.py --tiers imagenette --merge results/benchmark_device_imagenette.json \
+        results/benchmark_edge_imagenette.json
 """
 from __future__ import annotations
 
@@ -15,7 +22,7 @@ import json
 import sys
 from pathlib import Path
 
-from edgearbiter.benchmark import TIERS, benchmark_models, build_cost_table, host_info, markdown_table
+from edgearbiter.benchmark import TIER_SETS, benchmark_models, build_cost_table, host_info, markdown_table
 
 DEFAULT_MODELS = ["mobilenet_v3_small", "mobilenet_v3_large", "mobilenet_v3_large_int8", "resnet18", "resnet18_int8",
                   "efficientnet_b0", "ssdlite320_mobilenet_v3_large"]
@@ -38,6 +45,9 @@ def main():
     ap.add_argument("--no-data", action="store_true", help="skip Imagenette accuracy")
     ap.add_argument("--data-root", default="data")
     ap.add_argument("--max-batches", type=int, default=None)
+    ap.add_argument("--cpu-quota", type=float, default=None,
+                    help="emulate a slower device: limit the inference process to this many CPUs (cgroup)")
+    ap.add_argument("--tiers", choices=list(TIER_SETS), default="torchvision", help="models that form the cost table")
     ap.add_argument("--label", default=None, help="free-text host label stored with the results")
     ap.add_argument("--tag", default=None, help="suffix of the output files: benchmark_<role>_<tag>.*")
     ap.add_argument("--out", default="results")
@@ -46,12 +56,12 @@ def main():
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
 
     if args.merge:
-        table = build_cost_table(load_rows(args.merge[0]), load_rows(args.merge[1]))
+        table = build_cost_table(load_rows(args.merge[0]), load_rows(args.merge[1]), TIER_SETS[args.tiers])
     else:
         host = host_info(args.label)
         rows = benchmark_models(args.models, role=args.role, iters=args.iters, threads=args.threads,
                                 pretrained=args.weights == "pretrained", data_root=None if args.no_data else args.data_root,
-                                max_batches=args.max_batches)
+                                max_batches=args.max_batches, cpu_quota=args.cpu_quota)
         stem = f"benchmark_{args.role}" + (f"_{args.tag}" if args.tag else "")
         (out / f"{stem}.json").write_text(json.dumps({"host": host, "rows": rows}, indent=1), encoding="utf-8")
         md = markdown_table(rows, host)
@@ -59,10 +69,10 @@ def main():
         print(md)
         if args.role != "device" or args.tag:
             return
-        missing = [m for m in TIERS.values() if m not in {r["model"] for r in rows}]
+        missing = [m for m in TIER_SETS[args.tiers].values() if m not in {r["model"] for r in rows}]
         if missing:
             print(f"cost table not built: tier models missing from the run: {missing}"); return
-        table = build_cost_table(rows)
+        table = build_cost_table(rows, tiers=TIER_SETS[args.tiers])
     (out / "cost_table.json").write_text(json.dumps(table, indent=1), encoding="utf-8")
     print(f"\ncost table written to {out}/cost_table.json")
 

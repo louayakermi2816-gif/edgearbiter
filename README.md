@@ -19,15 +19,19 @@ own load to protect. EdgeArbiter studies that decision in three layers:
    **independent PPO (IPPO)** and **MAPPO** (centralised critic, decentralised
    execution), against static, rule-based and model-based baselines.
 
-A **FastAPI** service runs both agents on telemetry from a real **ESP32** node
-(MQTT), and a **Node-RED** flow closes the loop and shows the live choice.
+A **FastAPI** service runs both agents on telemetry from an **ESP32** node over
+**MQTT**, and a **Node-RED** board closes the loop and shows the live choice.
+Everything runs in software: a **virtual ESP32 node** (Python, same MQTT protocol as
+the firmware) drives the simulator in real time, and the Arduino firmware runs in the
+**Wokwi** ESP32 simulator — no hardware needed.
 
 ```
 torchvision models ──benchmark.py──▶ cost table ──▶ simulator (sim/env.py) ◀── scenarios
                                                           │
                      baselines (static, rule, greedy) ◀───┼───▶ PPO / IPPO / MAPPO (agents/mappo.py)
                                                           │
-ESP32 ──MQTT──▶ Node-RED ──HTTP──▶ FastAPI /policy/decide (device + edge agents) ──MQTT──▶ ESP32
+virtual ESP32 node / Wokwi ──MQTT──▶ Node-RED ──HTTP──▶ FastAPI /policy/decide ──▶ Node-RED ──MQTT──▶ node
+        (simulator + cost table)          (board)          (device + edge agents)
 ```
 
 ## Status (October 2026)
@@ -40,11 +44,12 @@ In development since September 2026. Every number below comes from a file in
 | Simulator, baselines, IPPO / MAPPO, experiment protocol | done, tested (`pytest`, CI) |
 | Multi-seed RL results (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
 | Latency / size benchmark, FP32 vs INT8, 1 and 4 threads | measured on a 4-vCPU x86 VM — [results/benchmark_edge.md](results/benchmark_edge.md) |
-| Imagenette training pipeline | validated: MobileNetV3-Small **from scratch 82.6 %** top-1 — [results/finetune_scratch.md](results/finetune_scratch.md) |
+| Imagenette training pipeline | validated: MobileNetV3-Small **from scratch 82.6 %** top-1 — [results/finetune_mobilenet_v3_small_scratch.md](results/finetune_mobilenet_v3_small_scratch.md) |
 | Top-1 of the ImageNet-pretrained FP32/INT8 models; fine-tuning from ImageNet | **pending**: needs the torchvision weights (download.pytorch.org) |
 | Device-side benchmark on the real IoT device → measured cost table | **pending** (the simulator uses the labelled synthetic table meanwhile) |
 | FastAPI service | run and exercised over HTTP (decisions, edge admission, simulator) |
-| ESP32 + Node-RED loop, Docker stack | code ready, not yet tested on hardware / with Docker |
+| Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the trained MAPPO actors: 150 / 150 decisions answered through Node-RED, mean round trip 14.5 ms; MQTT loop tested in CI |
+| ESP32 firmware in Wokwi; Docker stack | files ready; not run in the build environment (no Docker, no Arduino toolchain) |
 
 ## Quick start
 
@@ -63,8 +68,41 @@ uvicorn edgearbiter.api:app --reload                   # http://127.0.0.1:8000/d
 ```
 
 `train_single_agent.py` (PPO only) and `train_marl.py` (IPPO + MAPPO) run subsets
-of the same protocol. Full stack (API + Mosquitto + Node-RED): `docker compose up`;
-import `node-red/flows.json`; flash `firmware/esp32/edge_node/edge_node.ino`.
+of the same protocol. The IoT loop without hardware is described [below](#the-iot-loop-in-software).
+
+## The IoT loop in software
+
+<img alt="Node-RED board: live decision, energy and edge-load gauges, episode KPIs, latency and model-tier charts" src="docs/node-red-board.png">
+
+The board above is Node-RED (Dashboard 2.0) driven by the **virtual ESP32 node**
+(`edgearbiter/virtual_node.py`) with the trained MAPPO actors answering in the API.
+Each second the node publishes its telemetry (battery, queue, RTT, bandwidth, arrivals,
+`seq`) on `edgearbiter/telemetry`; the flow adds the edge load, calls `/policy/decide`
+and publishes the decision on `edgearbiter/decision`; the node runs that second of the
+simulator with the decision (same cost table, link, workload and energy model as in
+training) and publishes the outcome on `edgearbiter/node` for the board. A decision
+that does not come back within the interval counts as a timeout and the node keeps the
+last one, as the firmware does (the tiny model locally until the first decision arrives).
+
+```bash
+pip install -e ".[iot]"                                  # adds amqtt, a broker in Python
+python -m edgearbiter.broker --port 1883 &               # or Mosquitto
+MODEL_DEVICE=models/experiments/default/mappo_seed0_device.pt \
+MODEL_EDGE=models/experiments/default/mappo_seed0_edge.pt uvicorn edgearbiter.api:app --port 8000 &
+python -m edgearbiter.virtual_node --api http://localhost:8000 --steps 300   # node + policy, no Node-RED
+
+# with the board (Node-RED >= 3 and @flowfuse/node-red-dashboard installed in ~/.node-red):
+MQTT_HOST=localhost API_URL=http://localhost:8000 node-red node-red/flows.json   # http://localhost:1880/dashboard
+python -m edgearbiter.virtual_node                       # waits for the decisions from Node-RED
+```
+
+`docker compose up --build` runs the same four parts (Mosquitto, API, Node-RED with the
+dashboard, virtual node). The firmware (`firmware/esp32/edge_node/`) speaks the same
+protocol and comes with a Wokwi project (`diagram.json`, `wokwi.toml`, `platformio.ini`):
+it simulates frame arrivals and reads the battery level from a potentiometer, so the
+policy's reaction to a draining battery can be watched in the simulator. For an RL
+library, `edgearbiter.sim.DeviceEnv` exposes the device agent as a Gymnasium
+environment (edge on its rule, passes `gymnasium.utils.env_checker.check_env`).
 
 ## The simulator
 
@@ -245,7 +283,7 @@ adds Imagenette top-1 for every pretrained model.
 
 MobileNetV3-Small trained **from scratch** on Imagenette (160 px release, 128 px
 input, 20 epochs, AdamW one-cycle, CPU only): **82.6 % top-1** on the 3,925
-validation images ([results/finetune_scratch.md](results/finetune_scratch.md)).
+validation images ([results/finetune_mobilenet_v3_small_scratch.md](results/finetune_mobilenet_v3_small_scratch.md)).
 This validates the data pipeline, augmentation, schedule and checkpointing on real
 data and is the control for the fine-tuning run (ImageNet initialisation), which
 needs the pretrained weights. Benchmarked as a tier, the trained checkpoint runs in
@@ -269,12 +307,15 @@ edgearbiter/baselines.py      static, rule-based and deadline-greedy policies
 edgearbiter/evaluate.py       seeded evaluation, paired comparisons, tables
 edgearbiter/experiments.py    scenarios, multi-seed training, model selection, report
 edgearbiter/plots.py          learning curves (light / dark)
+edgearbiter/sim/gym_env.py    Gymnasium wrapper of the device agent (DeviceEnv)
 edgearbiter/api.py            FastAPI: /policy/decide, /infer, /sim/*
-firmware/esp32/edge_node/     ESP32 telemetry + decision node (Arduino)
-node-red/flows.json           telemetry -> decision loop with live status, sim KPIs
+edgearbiter/virtual_node.py   virtual ESP32 node: MQTT telemetry -> decision -> simulated interval
+edgearbiter/broker.py         MQTT broker in Python (amqtt), for running the loop without Mosquitto
+firmware/esp32/edge_node/     ESP32 telemetry + decision node (Arduino) and its Wokwi project
+node-red/flows.json           control loop (telemetry -> /policy/decide -> decision) and the board
 scripts/                      run_benchmark, finetune_imagenette, run_baselines, run_experiments,
                               train_single_agent, train_marl, inspect_policy
-tests/                        simulator, agents, benchmark, training loop, experiments, API
+tests/                        simulator, agents, benchmark, training loop, experiments, API, MQTT loop
 ```
 
 ## Limitations (known, on purpose)
@@ -287,8 +328,9 @@ tests/                        simulator, agents, benchmark, training loop, exper
   random-weight latency is indicative (NMS work depends on the scores).
 - Eager-mode INT8 (`torch.ao.quantization`) is deprecated upstream; it still ships
   with torch 2.14, the migration path is torchao.
-- The real device has no episode: the API feeds `t_fraction` = 0 and the battery
-  level as the remaining budget, an approximation of the training conditions.
+- A physical device has no episode: for the firmware the API feeds `t_fraction` = 0 and
+  the battery level as the remaining budget, an approximation of the training conditions
+  (the virtual node reports both from its simulated episode).
 
 ## License
 

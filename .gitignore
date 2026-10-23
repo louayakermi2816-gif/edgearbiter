@@ -18,3 +18,5 @@ results/*
 .vscode/
 .idea/
 *.log
+.pio/
+node_modules/

@@ -1,33 +1,38 @@
-"""Benchmark torchvision classifiers / detectors (FP32 and INT8) and build the cost table.
+"""Benchmark FP32 and INT8 classifiers / detectors and build the simulator's cost table.
 
 For each model we measure:
     latency_ms   p50 / p95 / mean over N single-image inferences (after warm-up), batch size 1,
                  at the model's input resolution, for each requested thread count
-    size_mb      serialised state_dict size (a proxy for memory footprint)
-    accuracy     10-way top-1 on the Imagenette validation split when pretrained weights and the
-                 dataset are available (ImageNet-pretrained heads are restricted to the 10
-                 Imagenette classes through the class-index mapping, so no fine-tuning is needed)
+    memory       peak resident memory of a fresh process that loads the model and runs the
+                 timed inferences, minus the process baseline (`edgearbiter.bench_worker`)
+    size_mb      serialised state_dict size (weights on disk)
+    accuracy     top-1 on the Imagenette validation split: native 10-class heads for the models
+                 trained by `edgearbiter.finetune`; ImageNet-pretrained heads restricted to the 10
+                 Imagenette classes through the class-index mapping
 
-Weights
-    pretrained   torchvision ImageNet weights (downloaded from download.pytorch.org on first use)
-    random       the same architectures with random initialisation. Latency and size depend on the
-                 architecture, not on the weight values (dense kernels do not exploit them), so a
-                 random-weight run gives valid latency/size numbers when the weights cannot be
-                 downloaded - but no accuracy. The detector's post-processing (NMS) is data
-                 dependent, so its random-weight latency is only indicative.
+Models
+    torchvision zoo    MobileNetV3-Small/Large, ResNet-18, EfficientNet-B0, SSDLite; INT8 variants
+                       shipped by torchvision (eager mode, on the engine their weights were calibrated
+                       for: qnnpack for MobileNetV3, fbgemm for ResNet-18). `pretrained` downloads the
+                       ImageNet weights; `random` builds the same architectures without download
+                       (latency / size / memory are valid, accuracy is not).
+    Imagenette models  <arch>_imagenette[_scratch] trained by `edgearbiter.finetune`, and their
+                       `_int8` variants: post-training static quantisation (FX graph mode, x86
+                       engine) calibrated on Imagenette training images (`edgearbiter.quantize`).
 
-INT8 models are torchvision's eager-mode quantised variants; each one runs on the quantisation
-engine its weights were calibrated for (qnnpack for MobileNetV3, fbgemm for ResNet-18).
-
-The "device" latency is what we measure on this machine; the "edge" latency is measured on the
-edge host when the script runs there (`--role edge`). Both are merged into
-results/cost_table.json which drives the simulator.
+Hardware profiles (no device needed): the "edge" is this machine with all its threads; the
+"device" is emulated by one thread in a CPU-bandwidth-limited cgroup (`--cpu-quota 0.25`,
+`edgearbiter.cpulimit`). Both are merged into results/cost_table.json, which drives the simulator.
 """
 from __future__ import annotations
 
 import io
+import json
 import os
 import platform
+import subprocess
+import sys
+import tempfile
 import time
 import warnings
 from dataclasses import dataclass
@@ -38,51 +43,54 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 import torch
 
-from .data import IMAGENETTE_TO_IMAGENET, imagenette, loader as make_loader
+from .data import IMAGENETTE_TO_IMAGENET, eval_transform, imagenette, loader as make_loader
 
 # tier name -> model key; edit to change which models play which role in the simulator
 TIERS = {"tiny": "mobilenet_v3_small", "small": "mobilenet_v3_large_int8", "medium": "resnet18"}
+TIER_SETS = {"torchvision": TIERS}
 ENERGY_MJ_PER_MS = 0.45     # crude device energy model: mJ per ms of CPU inference (calibrate with a power meter)
 
 
 @dataclass(frozen=True)
 class ModelSpec:
-    build: Callable[[bool], torch.nn.Module]   # build(pretrained) -> model
+    build: Callable[[bool], torch.nn.Module]   # build(pretrained) -> model (FP32 for `ptq` models)
     img: int = 224                             # input resolution for latency and accuracy
     detector: bool = False                     # detectors are benchmarked for latency only
     backend: Optional[str] = None              # quantisation engine of an INT8 model
     imagenet_head: bool = True                 # False: native 10-class Imagenette head (no class mapping)
+    ptq: bool = False                          # INT8 by post-training quantisation of `build(...)`'s model
 
 
 def _weights(enum, pretrained: bool):
     return enum.DEFAULT if pretrained else None
 
 
-def _imagenette_model(models_dir: str, init: str) -> ModelSpec:
-    """MobileNetV3-Small trained by `edgearbiter.finetune` (10-class head, its own input size)."""
+def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_small", int8: bool = False) -> ModelSpec:
+    """A model trained by `edgearbiter.finetune` (10-class head, its own input size), FP32 or INT8."""
     from .finetune import build_model, checkpoint_path, read_metrics
 
-    ckpt = checkpoint_path(models_dir, init)
+    ckpt = checkpoint_path(models_dir, init, arch)
     img = int((read_metrics(ckpt) or {}).get("config", {}).get("img", 128))
 
     def build(pretrained: bool) -> torch.nn.Module:
-        model = build_model(pretrained=False)
+        model = build_model(pretrained=False, arch=arch)
         if pretrained:
             if not ckpt.exists():
-                raise FileNotFoundError(f"{ckpt} not found: run scripts/finetune_imagenette.py first")
+                raise FileNotFoundError(f"{ckpt} not found: run scripts/finetune_imagenette.py --arch {arch} first")
             model.load_state_dict(torch.load(ckpt, map_location="cpu"))
         return model
-    return ModelSpec(build, img=img, imagenet_head=False)
+    return ModelSpec(build, img=img, imagenet_head=False, ptq=int8, backend="x86" if int8 else None)
 
 
 def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
     """Lazily constructed models (pretrained weights download on first use)."""
     import torchvision.models as tvm
     from torchvision.models import quantization as tvq
+    from .finetune import ARCHS
 
     qmnv3, qr18 = tvq.MobileNet_V3_Large_QuantizedWeights, tvq.ResNet18_QuantizedWeights
     ssd = tvm.detection.SSDLite320_MobileNet_V3_Large_Weights
-    return {
+    zoo = {
         "mobilenet_v3_small": ModelSpec(lambda p: tvm.mobilenet_v3_small(weights=_weights(tvm.MobileNet_V3_Small_Weights, p))),
         "mobilenet_v3_large": ModelSpec(lambda p: tvm.mobilenet_v3_large(weights=_weights(tvm.MobileNet_V3_Large_Weights, p))),
         "resnet18": ModelSpec(lambda p: tvm.resnet18(weights=_weights(tvm.ResNet18_Weights, p))),
@@ -95,10 +103,18 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
         # detector (latency only unless a COCO evaluation is wired in)
         "ssdlite320_mobilenet_v3_large": ModelSpec(lambda p: tvm.detection.ssdlite320_mobilenet_v3_large(
             weights=_weights(ssd, p), weights_backbone=None), img=320, detector=True),
-        # models trained on Imagenette by scripts/finetune_imagenette.py
-        "mobilenet_v3_small_imagenette": _imagenette_model(models_dir, "imagenet"),
-        "mobilenet_v3_small_imagenette_scratch": _imagenette_model(models_dir, "scratch"),
     }
+    # models trained on Imagenette by scripts/finetune_imagenette.py, FP32 and post-training INT8
+    for arch in ARCHS:
+        for init, suffix in (("imagenet", ""), ("scratch", "_scratch")):
+            zoo[f"{arch}_imagenette{suffix}"] = _imagenette_model(models_dir, init, arch)
+            zoo[f"{arch}_imagenette{suffix}_int8"] = _imagenette_model(models_dir, init, arch, int8=True)
+    return zoo
+
+
+TIER_SETS["imagenette"] = {"tiny": "mobilenet_v3_small_imagenette_scratch",
+                           "small": "mobilenet_v3_large_imagenette_scratch_int8",
+                           "medium": "resnet18_imagenette_scratch"}
 
 
 def set_quant_engine(preferred: Optional[str] = None) -> str:
@@ -160,10 +176,12 @@ def imagenette_accuracy(model: torch.nn.Module, loader, max_batches: Optional[in
     return correct / max(1, total)
 
 
-def imagenette_loader(root: str = "data", img: int = 224, batch_size: int = 32, download: bool = True):
-    """Validation loader for Imagenette at the given resolution; None if the dataset cannot be obtained."""
+def imagenette_loader(root: str = "data", img: int = 224, batch_size: int = 32, download: bool = True, split: str = "val",
+                      shuffle: bool = False):
+    """Imagenette loader at the given resolution (evaluation transform); None if the dataset is unavailable."""
     try:
-        return make_loader(imagenette(root, "val", img=img, download=download), batch_size=batch_size)
+        return make_loader(imagenette(root, split, img=img, download=download, transform=eval_transform(img)),
+                           batch_size=batch_size, shuffle=shuffle)
     except Exception as exc:
         print(f"[benchmark] Imagenette unavailable ({exc}); accuracy will be null")
         return None
@@ -183,31 +201,61 @@ def host_info(label: Optional[str] = None) -> Dict:
             "date_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
+def run_worker(job: dict, timeout: float = 1800.0) -> dict:
+    """Measure one model in a fresh process (see `edgearbiter.bench_worker`)."""
+    proc = subprocess.run([sys.executable, "-m", "edgearbiter.bench_worker", json.dumps(job)], capture_output=True,
+                          text=True, timeout=timeout)
+    for line in proc.stdout.splitlines():
+        if line.startswith("BENCH_RESULT "):
+            return json.loads(line[len("BENCH_RESULT "):])
+    raise RuntimeError(f"benchmark worker failed for {job['model']}:\n{proc.stderr[-2000:]}")
+
+
 def benchmark_models(names: List[str], role: str = "device", iters: int = 50, threads: Sequence[Optional[int]] = (None,),
                      pretrained: bool = True, data_root: Optional[str] = None, max_batches: Optional[int] = None,
-                     models_dir: str = "models") -> List[Dict]:
-    """One row per (model, thread count). Accuracy needs pretrained weights and `data_root`."""
-    zoo = model_zoo(models_dir); loaders: Dict[int, object] = {}
+                     models_dir: str = "models", cpu_quota: Optional[float] = None, calib_batches: int = 16) -> List[Dict]:
+    """One row per (model, thread count). Accuracy needs trained/pretrained weights and `data_root`;
+    INT8 models trained here (`*_int8`) need `data_root` for their calibration images."""
+    from contextlib import nullcontext
+    from .cpulimit import CpuLimit
+    zoo = model_zoo(models_dir); loaders: Dict[tuple, object] = {}
     rows = []
-    for name in names:
-        spec = zoo[name]
-        print(f"[benchmark] {name} ({'pretrained' if pretrained else 'random-init'}, {spec.img}px) ...")
-        model = build(spec, pretrained)
-        engine = torch.backends.quantized.engine if spec.backend else None
-        acc = None
-        if pretrained and data_root and not spec.detector:
-            if spec.img not in loaders:
-                loaders[spec.img] = imagenette_loader(data_root, spec.img)
-            if loaders[spec.img] is not None:
-                acc = imagenette_accuracy(model, loaders[spec.img], max_batches, spec.imagenet_head)
-        size = round(state_dict_size_mb(model), 2)
-        for n_threads in threads:
-            lat = measure_latency(model, example_input(spec), iters=iters, threads=n_threads)
-            rows.append({"model": name, "role": role, "int8": spec.backend is not None, "quant_engine": engine,
-                         "weights": ("pretrained" if spec.imagenet_head else "trained") if pretrained else "random", "img": spec.img,
-                         "threads": n_threads or torch.get_num_threads(), "latency_ms": lat, "size_mb": size,
-                         "accuracy": acc, "accuracy_metric": "imagenette_10way_top1" if acc is not None else None})
-            print(f"    threads {rows[-1]['threads']}: p50 {lat['p50']:.1f} ms  p95 {lat['p95']:.1f} ms  size {size} MB  acc {acc}")
+    with tempfile.TemporaryDirectory() as tmp, (CpuLimit(cpu_quota) if cpu_quota else nullcontext()) as limit:
+        for name in names:
+            spec = zoo[name]
+            label = "random-init" if not pretrained else ("trained" if not spec.imagenet_head else "pretrained")
+            print(f"[benchmark] {name} ({label}, {spec.img}px) ...", flush=True)
+            model = build(spec, pretrained)
+            int8_state = None
+            if spec.ptq:
+                from .quantize import quantize_ptq
+                if not data_root:
+                    raise ValueError(f"{name}: post-training quantisation needs calibration images (data_root)")
+                key = ("train", spec.img)
+                loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True))
+                model = quantize_ptq(model, loaders[key], backend=spec.backend, batches=calib_batches, img=spec.img)
+                int8_state = str(Path(tmp) / f"{name}.pt"); torch.save(model.state_dict(), int8_state)
+            acc = None
+            if pretrained and data_root and not spec.detector:
+                key = ("val", spec.img)
+                loaders.setdefault(key, imagenette_loader(data_root, spec.img))
+                if loaders[key] is not None:
+                    acc = imagenette_accuracy(model, loaders[key], max_batches, spec.imagenet_head)
+            size = round(state_dict_size_mb(model), 2)
+            for n_threads in threads:
+                job = {"model": name, "pretrained": pretrained, "threads": n_threads or torch.get_num_threads(),
+                       "iters": iters, "models_dir": models_dir, "int8_state": int8_state, "engine": spec.backend,
+                       "cgroup_procs": limit.procs if limit else None}
+                m = run_worker(job)
+                rows.append({"model": name, "role": role, "int8": spec.backend is not None, "quant_engine": m["quant_engine"],
+                             "quantisation": ("PTQ (FX)" if spec.ptq else "torchvision") if spec.backend else None,
+                             "weights": "random" if not pretrained else label, "img": spec.img, "threads": m["threads"],
+                             "cpu_quota": cpu_quota, "latency_ms": m["latency_ms"], "size_mb": size,
+                             "memory_mb": m["model_mem_mb"], "rss_peak_mb": m["rss_peak_mb"], "accuracy": acc,
+                             "accuracy_metric": ("imagenette_10way_top1" if acc is not None else None)})
+                lat = m["latency_ms"]
+                print(f"    threads {m['threads']}{f' @ {cpu_quota:g} CPU' if cpu_quota else ''}: p50 {lat['p50']:.1f} ms  "
+                      f"p95 {lat['p95']:.1f} ms  memory {m['model_mem_mb']} MB  size {size} MB  acc {acc}", flush=True)
     return rows
 
 
@@ -217,15 +265,20 @@ def markdown_table(rows: List[Dict], host: Optional[Dict] = None) -> str:
         weights = sorted({r["weights"] for r in rows})
         lines += [f"Host: {host.get('label') or host['cpu']} ({host['cpu']}, {host['logical_cpus']} logical CPUs) · "
                   f"torch {host['torch']} · weights: {', '.join(weights)} · {host['date_utc']}", ""]
+        quotas = sorted({r.get("cpu_quota") for r in rows if r.get("cpu_quota")})
+        if quotas:
+            lines += [f"Emulated device: inference thread limited to {', '.join(f'{q:g}' for q in quotas)} CPU "
+                      f"(cgroup CFS quota).", ""]
         if "random" in weights:
-            lines += ["Random-init weights: latency and size are valid, accuracy is not measured.", ""]
-    lines += ["| model | int8 (engine) | input | threads | p50 ms | p95 ms | size MB | top-1 (Imagenette, 10-way) |",
-              "|---|---|---|---|---|---|---|---|"]
+            lines += ["Random-init weights: latency, size and memory are valid, accuracy is not measured.", ""]
+    lines += ["| model | precision | input | threads | p50 ms | p95 ms | memory MB | size MB | top-1 (Imagenette, 10-way) |",
+              "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         acc = "—" if r["accuracy"] is None else f"{100 * r['accuracy']:.1f}%"
-        q = f"yes ({r['quant_engine']})" if r["int8"] else "no"
+        q = f"INT8 ({r['quant_engine']}{', PTQ' if r.get('quantisation') == 'PTQ (FX)' else ''})" if r["int8"] else "FP32"
+        mem = "—" if r.get("memory_mb") is None else f"{r['memory_mb']:.1f}"
         lines.append(f"| {r['model']} | {q} | {r['img']}px | {r['threads']} | {r['latency_ms']['p50']:.1f} | "
-                     f"{r['latency_ms']['p95']:.1f} | {r['size_mb']} | {acc} |")
+                     f"{r['latency_ms']['p95']:.1f} | {mem} | {r['size_mb']} | {acc} |")
     return "\n".join(lines) + "\n"
 
 
@@ -233,6 +286,11 @@ def _pick(rows: List[Dict], model: str) -> Optional[Dict]:
     """The row of `model` with the most threads (a device uses all its cores)."""
     rows = [r for r in rows if r["model"] == model]
     return max(rows, key=lambda r: r.get("threads") or 0) if rows else None
+
+
+def _p95(row: Dict) -> Optional[float]:
+    p95 = row["latency_ms"].get("p95")
+    return round(p95, 2) if p95 is not None else None
 
 
 def build_cost_table(device_rows: List[Dict], edge_rows: Optional[List[Dict]] = None, tiers: Dict[str, str] = TIERS) -> Dict:
@@ -247,6 +305,7 @@ def build_cost_table(device_rows: List[Dict], edge_rows: Optional[List[Dict]] = 
         edge_lat = e["latency_ms"]["p50"] if e else dev_lat / 8.0      # no edge run yet: assume an 8x faster server
         out.append({"name": tier, "model": model, "accuracy": d["accuracy"],
                     "latency_ms": {"device": round(dev_lat, 2), "edge": round(edge_lat, 2)},
+                    "latency_p95_ms": {"device": _p95(d), "edge": _p95(e) if e else None},
                     "energy_mj": round(dev_lat * ENERGY_MJ_PER_MS, 2), "size_mb": d["size_mb"],
-                    "edge_measured": e is not None})
+                    "memory_mb": d.get("memory_mb"), "edge_measured": e is not None})
     return {"tiers": out, "frame_kb": 40.0, "tx_energy_mj_per_kb": 0.25, "source": "benchmark"}
