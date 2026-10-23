@@ -204,7 +204,7 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
         for n_threads in threads:
             lat = measure_latency(model, example_input(spec), iters=iters, threads=n_threads)
             rows.append({"model": name, "role": role, "int8": spec.backend is not None, "quant_engine": engine,
-                         "weights": "pretrained" if pretrained else "random", "img": spec.img,
+                         "weights": ("pretrained" if spec.imagenet_head else "trained") if pretrained else "random", "img": spec.img,
                          "threads": n_threads or torch.get_num_threads(), "latency_ms": lat, "size_mb": size,
                          "accuracy": acc, "accuracy_metric": "imagenette_10way_top1" if acc is not None else None})
             print(f"    threads {rows[-1]['threads']}: p50 {lat['p50']:.1f} ms  p95 {lat['p95']:.1f} ms  size {size} MB  acc {acc}")

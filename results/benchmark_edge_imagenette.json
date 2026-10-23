@@ -1,0 +1,48 @@
+{
+ "host": {
+  "label": "cloud VM, 4 vCPU (edge-server stand-in)",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "logical_cpus": 4,
+  "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+  "python": "3.13.17",
+  "torch": "2.14.1+cu130",
+  "torchvision": "0.29.1+cu130",
+  "date_utc": "2026-10-23T16:50:04Z"
+ },
+ "rows": [
+  {
+   "model": "mobilenet_v3_small_imagenette_scratch",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 9.221806499681406,
+    "p95": 14.581472500549353,
+    "mean": 10.519298370018078
+   },
+   "size_mb": 6.24,
+   "accuracy": 0.8262420382165605,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "mobilenet_v3_small_imagenette_scratch",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 12.20779949971984,
+    "p95": 16.35676124938072,
+    "mean": 12.026076579950313
+   },
+   "size_mb": 6.24,
+   "accuracy": 0.8262420382165605,
+   "accuracy_metric": "imagenette_10way_top1"
+  }
+ ]
+}

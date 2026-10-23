@@ -12,7 +12,9 @@ Implementation choices follow Yu et al., "The Surprising Effectiveness of PPO in
 Cooperative Multi-Agent Games" (NeurIPS 2022): value targets are normalised with
 running statistics, actors and critics have separate optimisers and gradient
 clipping, rollouts come from `n_envs` simulator copies stepped in lock-step, and
-the learning rate is annealed linearly.
+the learning rate is annealed linearly. Actors can be warm-started by behaviour cloning
+of a fixed policy (`init_policies`), e.g. the edge's existing admission rule, which avoids
+the "nobody offloads" equilibrium that joint training from scratch tends to fall into.
 """
 from __future__ import annotations
 
@@ -123,12 +125,15 @@ class MAPPOConfig:
     gae_lambda: float = 0.95
     clip: float = 0.2
     ent_coef: float = 0.01
+    ent_coefs: Optional[Dict[str, float]] = None   # per-agent overrides of ent_coef, e.g. {"edge": 0.001}
     max_grad_norm: float = 0.5
     hidden: int = 128
     factorized: bool = False            # one policy head per action factor (env.action_factors) instead of one softmax
     value_norm: bool = True
     seed: int = 0
     centralized_critic: bool = True     # True = MAPPO, False = IPPO
+    bc_steps: int = 20_000              # environment steps of teacher data for `init_policies` warm starts
+    bc_smoothing: float = 0.2           # label smoothing of the warm start (lower = closer to the teacher)
     callback_every: int = 0             # env steps between `callback(steps, actors)` calls (0 = never)
 
 
@@ -147,12 +152,50 @@ def gae(rewards, values, dones, last_value, gamma, lam):
 FixedPolicy = Callable[[Dict[str, np.ndarray], object], int]
 
 
+def behaviour_clone(actors: Dict[str, Actor], teachers: Dict[str, FixedPolicy], env, steps: int = 20_000,
+                    epochs: int = 10, smoothing: float = 0.2, seed: int = 0) -> Dict[str, float]:
+    """Initialise actors by imitating fixed policies (cross-entropy on the teachers' actions).
+
+    States come from the teachers acting, with every other agent acting uniformly at random so
+    the visited states are diverse. Label smoothing keeps some entropy for the PPO phase that
+    follows. Returns the agreement (argmax accuracy) of each actor with its teacher."""
+    rng = np.random.default_rng(seed)
+    obs, _ = env.reset(seed=seed)
+    data = {a: ([], []) for a in teachers}
+    for _ in range(steps):
+        actions = {a: (teachers[a](obs, env) if a in teachers else int(rng.integers(env.action_spaces[a].n)))
+                   for a in env.action_spaces}
+        for a in teachers:
+            data[a][0].append(obs[a]); data[a][1].append(actions[a])
+        obs, _, term, trunc, _ = env.step(actions)
+        if term or trunc:
+            obs, _ = env.reset()
+    agreement = {}
+    for a, (xs, ys) in data.items():
+        x, y = torch.as_tensor(np.array(xs)), torch.as_tensor(ys)
+        opt = torch.optim.Adam(actors[a].parameters(), lr=1e-3)
+        n_classes = actors[a].factors
+        for _ in range(epochs):
+            for mb in torch.randperm(len(x)).split(256):
+                d = actors[a].dist(x[mb])
+                digits = d._digits(y[mb])
+                loss = sum(torch.nn.functional.cross_entropy(p.logits, t, label_smoothing=smoothing)
+                           for p, t in zip(d.parts, digits)) / len(n_classes)
+                opt.zero_grad(); loss.backward(); opt.step()
+        with torch.no_grad():
+            agreement[a] = float((actors[a].dist(x).mode() == y).float().mean())
+    return agreement
+
+
 def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str] = ("device", "edge"),
                 fixed_policies: Optional[Dict[str, FixedPolicy]] = None, log: Optional[Callable] = print,
-                callback: Optional[Callable[[int, Dict[str, Actor]], None]] = None):
+                callback: Optional[Callable[[int, Dict[str, Actor]], None]] = None,
+                init_policies: Optional[Dict[str, FixedPolicy]] = None):
     """Train the `controlled` agents; returns (actors, critics, history of training episodes).
 
-    With a centralised critic, `critics` maps every controlled agent to the same shared critic."""
+    `init_policies` warm-starts controlled actors by behaviour cloning of fixed policies (e.g. the
+    edge's admission rule) before the PPO updates. With a centralised critic, `critics` maps every
+    controlled agent to the same shared critic."""
     torch.manual_seed(cfg.seed); np.random.seed(cfg.seed)
     fixed_policies = fixed_policies or {}
     agents = list(env.observation_spaces)
@@ -160,6 +203,12 @@ def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str]
     obs_dims = {a: env.observation_spaces[a].shape[0] for a in agents}
     factors = getattr(env, "action_factors", {}) if cfg.factorized else {}
     actors = {a: Actor(obs_dims[a], env.action_spaces[a].n, cfg.hidden, factors.get(a)) for a in controlled}
+    teachers = {a: p for a, p in (init_policies or {}).items() if a in actors}
+    if teachers:
+        agreement = behaviour_clone(actors, teachers, copy.deepcopy(env), steps=cfg.bc_steps,
+                                    smoothing=cfg.bc_smoothing, seed=cfg.seed)
+        if log:
+            log({"behaviour_cloning": agreement})
     if cfg.centralized_critic:
         critics = {"team": Critic(sum(obs_dims.values()), cfg.hidden)}
         value_of = {a: "team" for a in controlled}
@@ -259,7 +308,7 @@ def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str]
                     ratio = torch.exp(d.log_prob(t_act[a][mb]) - t_logp[a][mb])
                     adv_mb = adv[value_of[a]][mb]
                     surr = torch.min(ratio * adv_mb, torch.clamp(ratio, 1 - cfg.clip, 1 + cfg.clip) * adv_mb)
-                    loss_pi = -surr.mean() - cfg.ent_coef * d.entropy().mean()
+                    loss_pi = -surr.mean() - (cfg.ent_coefs or {}).get(a, cfg.ent_coef) * d.entropy().mean()
                     a_opt[a].zero_grad(); loss_pi.backward()
                     nn.utils.clip_grad_norm_(actors[a].parameters(), cfg.max_grad_norm); a_opt[a].step()
         if callback and cfg.callback_every and steps >= next_callback:

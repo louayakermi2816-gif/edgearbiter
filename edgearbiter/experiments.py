@@ -2,13 +2,17 @@
 
 Protocol
     - every method is evaluated on the same test episodes (seeds TEST_SEED0 ...)
-    - learning curves and the choice of the best static configuration use validation
-      episodes (seeds VAL_SEED0 ...), never the test episodes
+    - learning curves, the choice of the best static configuration and model selection use
+      validation episodes (seeds VAL_SEED0 ...), never the test episodes
+    - each training run keeps the actors of its best validation evaluation (early stopping)
+    - IPPO / MAPPO start the edge actor from the edge rule (behaviour cloning) and then learn both
+      agents jointly; `mappo_scratch` is the ablation without that warm start
     - learned methods are trained with several seeds; tables pool the test episodes of all
       seeds (paired with the baselines episode by episode) and per-seed means are reported
 """
 from __future__ import annotations
 
+import copy
 import json
 import multiprocessing as mp
 import time
@@ -27,15 +31,19 @@ SCENARIOS: Dict[str, SimConfig] = {
     "default": SimConfig(),
     "energy_constrained": replace(SimConfig(), battery_mj=40_000.0),   # 40 J per 300 s episode (~133 mW)
 }
-ALGOS = {   # name -> (controlled agents, centralised critic)
-    "ppo": (("device",), False),            # single agent: the edge follows the fixed rule
-    "ippo": (("device", "edge"), False),
-    "mappo": (("device", "edge"), True),
+ALGOS = {   # name -> (controlled agents, centralised critic, edge actor warm-started from the edge rule)
+    "ppo": (("device",), False, False),             # single agent: the edge follows the fixed rule
+    "ippo": (("device", "edge"), False, True),
+    "mappo": (("device", "edge"), True, True),
+    "mappo_scratch": (("device", "edge"), True, False),   # ablation: both agents from random initialisation
 }
-LABELS = {"ppo": "PPO (device, edge rule)", "ippo": "IPPO (device+edge)", "mappo": "MAPPO (device+edge)"}
+LABELS = {"ppo": "PPO (device, edge rule)", "ippo": "IPPO (device+edge)", "mappo": "MAPPO (device+edge)",
+          "mappo_scratch": "MAPPO, edge from scratch"}
 # trainer settings chosen in pilot runs on validation episodes (see README): a longer discount for the
-# episode-long energy budget, and one policy head per action factor
-DEFAULT_MAPPO = {"gamma": 0.995, "factorized": True}
+# episode-long energy budget, a larger entropy bonus for the device, a near-deterministic warm start
+# and a small entropy bonus for the edge (whose learning signal is weak: its action only matters when
+# the device offloads), one softmax over the joint action
+DEFAULT_MAPPO = {"gamma": 0.995, "ent_coef": 0.02, "ent_coefs": {"edge": 0.001}, "bc_smoothing": 0.05}
 
 
 def static_policy(action: int) -> Callable:
@@ -76,31 +84,40 @@ def train_run(job: dict) -> dict:
     scenario, algo, seed = job["scenario"], job["algo"], job["seed"]
     costs = CostTable.load(job.get("cost_table"))
     cfg = SCENARIOS[scenario]
-    controlled, central = ALGOS[algo]
+    controlled, central, warm_edge = ALGOS[algo]
     mcfg = MAPPOConfig(total_steps=job["steps"], seed=seed, centralized_critic=central,
                        callback_every=job.get("eval_every", 50_000), **job.get("mappo", {}))
     curve: List[dict] = []
+    best = {"return": -np.inf, "steps": 0, "state": None}
     t0 = time.time()
 
-    def on_eval(steps, actors):
+    def on_eval(steps, actors):     # validation episodes only; keeps the best actors (early stopping)
         pol = policies_from_actors(actors)
         r = evaluate(pol["device"], pol.get("edge", edge_rule), costs=costs, cfg=cfg, n_episodes=job.get("val_episodes", 10),
                      seed0=VAL_SEED0)
         curve.append({"steps": steps, "seconds": round(time.time() - t0, 1),
                       **{k: float(v.mean()) for k, v in r.items()}})
+        if curve[-1]["return"] > best["return"]:
+            best.update(steps=steps, state={a: copy.deepcopy(m.state_dict()) for a, m in actors.items()},
+                        **{"return": curve[-1]["return"]})
 
     actors, _, _ = train_mappo(EdgeArbiterEnv(costs, cfg), mcfg, controlled=controlled,
                                fixed_policies={"edge": edge_rule} if "edge" not in controlled else None,
-                               log=None, callback=on_eval)
+                               log=None, callback=on_eval, init_policies={"edge": edge_rule} if warm_edge else None)
+    if best["state"] is not None:
+        for a, m in actors.items():
+            m.load_state_dict(best["state"][a])
     curve_path, actor_paths = run_paths(job["out_dir"], job["models_dir"], scenario, algo, seed)
     curve_path.parent.mkdir(parents=True, exist_ok=True)
     for a, path in actor_paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         save_actor(actors[a], path, agent=a, algo=algo, scenario=scenario, seed=seed)
     curve_path.write_text(json.dumps({"job": {k: v for k, v in job.items() if k not in ("out_dir", "models_dir")},
-                                      "config": asdict(mcfg), "curve": curve, "seconds": round(time.time() - t0, 1)},
+                                      "config": asdict(mcfg), "curve": curve, "selected_steps": best["steps"],
+                                      "selected_val_return": best["return"], "seconds": round(time.time() - t0, 1)},
                                      indent=1), encoding="utf-8")
-    print(f"[train] {scenario}/{algo}/seed{seed}: final val return {curve[-1]['return']:.1f} ({time.time() - t0:.0f}s)", flush=True)
+    print(f"[train] {scenario}/{algo}/seed{seed}: best val return {best['return']:.1f} at {best['steps']} steps, "
+          f"final {curve[-1]['return']:.1f} ({time.time() - t0:.0f}s)", flush=True)
     return {"scenario": scenario, "algo": algo, "seed": seed, "curve_path": str(curve_path)}
 
 
@@ -163,7 +180,8 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
             seed_rows.append(f"| {LABELS[a]} | " + " | ".join(f"{m:.1f}" for m in per_seed) + " |")
         header = (f"### Scenario `{s}` (battery {cfg.battery_mj / 1000:.0f} J per {cfg.horizon} s episode)\n\n"
                   f"Mean ± std over {n_episodes} test episodes (seeds {TEST_SEED0}+; learned methods: pooled over "
-                  f"{len(seeds)} training seeds). Δ return: paired difference vs `{ref}` with 95 % CI.")
+                  f"{len(seeds)} training seeds, actors from each run's best validation evaluation). Δ return: paired "
+                  f"difference vs `{ref}` with 95 % CI.")
         save_results(results, out_dir, f"{name}_{s}", ref=ref, header=header)
         per_seed_table = ("| method | " + " | ".join(f"seed {k}" for k in seeds) + " |\n|" + "---|" * (len(seeds) + 1)
                           + "\n" + "\n".join(seed_rows))

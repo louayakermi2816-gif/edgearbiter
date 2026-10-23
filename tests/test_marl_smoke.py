@@ -64,3 +64,14 @@ def test_save_and_load_actor(tmp_path):
     loaded = load_actor(tmp_path / "a.pt")
     obs = np.random.default_rng(0).random(12).astype(np.float32)
     assert loaded.act(obs) == actor.act(obs) and loaded.net[0].out_features == 32
+
+
+def test_behaviour_cloning_warm_start_imitates_the_edge_rule():
+    from edgearbiter.agents.mappo import behaviour_clone
+    env = EdgeArbiterEnv(CostTable.synthetic(), SMALL)
+    actor = Actor(env.observation_spaces["edge"].shape[0], env.action_spaces["edge"].n, hidden=64)
+    agreement = behaviour_clone({"edge": actor}, {"edge": edge_rule}, env, steps=4000, epochs=30)
+    assert agreement["edge"] > 0.9
+    actors, _, _ = train_mappo(EdgeArbiterEnv(CostTable.synthetic(), SMALL), MAPPOConfig(**TINY, bc_steps=1000), log=None,
+                               init_policies={"edge": edge_rule})
+    assert set(actors) == {"device", "edge"}

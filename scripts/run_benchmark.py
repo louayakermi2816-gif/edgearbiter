@@ -5,6 +5,7 @@
     python scripts/run_benchmark.py --no-data --iters 20  # latency/size only (quick)
     python scripts/run_benchmark.py --weights random      # no weight download: latency/size only
     python scripts/run_benchmark.py --threads 1 4         # one row per thread count
+    python scripts/run_benchmark.py --models mobilenet_v3_small_imagenette_scratch --tag imagenette   # trained model
     python scripts/run_benchmark.py --merge results/benchmark_device.json results/benchmark_edge.json
 """
 from __future__ import annotations
@@ -38,6 +39,7 @@ def main():
     ap.add_argument("--data-root", default="data")
     ap.add_argument("--max-batches", type=int, default=None)
     ap.add_argument("--label", default=None, help="free-text host label stored with the results")
+    ap.add_argument("--tag", default=None, help="suffix of the output files: benchmark_<role>_<tag>.*")
     ap.add_argument("--out", default="results")
     ap.add_argument("--merge", nargs=2, metavar=("DEVICE_JSON", "EDGE_JSON"))
     args = ap.parse_args()
@@ -50,11 +52,12 @@ def main():
         rows = benchmark_models(args.models, role=args.role, iters=args.iters, threads=args.threads,
                                 pretrained=args.weights == "pretrained", data_root=None if args.no_data else args.data_root,
                                 max_batches=args.max_batches)
-        (out / f"benchmark_{args.role}.json").write_text(json.dumps({"host": host, "rows": rows}, indent=1), encoding="utf-8")
+        stem = f"benchmark_{args.role}" + (f"_{args.tag}" if args.tag else "")
+        (out / f"{stem}.json").write_text(json.dumps({"host": host, "rows": rows}, indent=1), encoding="utf-8")
         md = markdown_table(rows, host)
-        (out / f"benchmark_{args.role}.md").write_text(md, encoding="utf-8")
+        (out / f"{stem}.md").write_text(md, encoding="utf-8")
         print(md)
-        if args.role != "device":
+        if args.role != "device" or args.tag:
             return
         missing = [m for m in TIERS.values() if m not in {r["model"] for r in rows}]
         if missing:
