@@ -6,7 +6,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from edgearbiter.costs import CostTable
-from edgearbiter.experiments import SCENARIOS, best_static, evaluate_learned, load_curves, run_experiment
+from edgearbiter.experiments import (SCENARIOS, best_static, evaluate_learned, load_curves, run_experiment,
+                                      scenario_configs)
 from edgearbiter.sim.env import SimConfig
 
 
@@ -14,6 +15,13 @@ def test_best_static_is_the_argmax_over_fixed_actions():
     name, pol, scores = best_static(CostTable.synthetic(), SimConfig(horizon=30), n_episodes=2)
     assert len(scores) == 18 and pol(None, None) == max(scores, key=scores.get)
     assert name.startswith("best static ")
+
+
+def test_relative_budget_matches_the_synthetic_scenario():
+    configs = scenario_configs(CostTable.synthetic(), budget_fraction=0.7)
+    assert configs["default"] == SCENARIOS["default"]
+    assert 39_000 <= configs["energy_constrained"].battery_mj <= 41_000         # the hand-set 40 J
+    assert scenario_configs(CostTable.synthetic()) == SCENARIOS
 
 
 def test_run_experiment_writes_tables_curves_and_actors(tmp_path):

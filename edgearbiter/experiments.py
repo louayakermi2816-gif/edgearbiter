@@ -31,6 +31,9 @@ SCENARIOS: Dict[str, SimConfig] = {
     "default": SimConfig(),
     "energy_constrained": replace(SimConfig(), battery_mj=40_000.0),   # 40 J per 300 s episode (~133 mW)
 }
+# On the synthetic table, 40 J is ~70 % of the energy the best fixed configuration uses in `default` on the
+# validation episodes (56.6 J): the budget binds. `scenario_configs(costs, budget_fraction=0.7)` sets the same
+# relative budget on any cost table.
 ALGOS = {   # name -> (controlled agents, centralised critic, edge actor warm-started from the edge rule)
     "ppo": (("device",), False, False),             # single agent: the edge follows the fixed rule
     "ippo": (("device", "edge"), False, True),
@@ -64,6 +67,17 @@ def best_static(costs: CostTable, cfg: SimConfig, n_episodes: int = 10) -> Tuple
     return f"best {static_name(env, a)}", static_policy(a), scores
 
 
+def scenario_configs(costs: CostTable, budget_fraction: Optional[float] = None) -> Dict[str, SimConfig]:
+    """The scenarios on a cost table. With `budget_fraction`, the energy_constrained budget is that fraction of
+    the energy the best fixed configuration uses in `default` (validation episodes), instead of 40 J."""
+    if budget_fraction is None:
+        return dict(SCENARIOS)
+    _, pol, _ = best_static(costs, SCENARIOS["default"])
+    energy_j = float(evaluate(pol, costs=costs, cfg=SCENARIOS["default"], n_episodes=10, seed0=VAL_SEED0)["energy_j"].mean())
+    budget = replace(SCENARIOS["energy_constrained"], battery_mj=round(budget_fraction * energy_j * 1000.0, -2))
+    return {**SCENARIOS, "energy_constrained": budget}
+
+
 def evaluate_baselines(costs: CostTable, cfg: SimConfig, n_episodes: int = 20, best=None) -> Dict[str, Dict[str, np.ndarray]]:
     name, pol, _ = best or best_static(costs, cfg)
     pols = {**BASELINES, name: pol}
@@ -84,7 +98,7 @@ def train_run(job: dict) -> dict:
     torch.set_num_threads(1)
     scenario, algo, seed = job["scenario"], job["algo"], job["seed"]
     costs = CostTable.load(job.get("cost_table"))
-    cfg = SCENARIOS[scenario]
+    cfg = SimConfig(**job["sim"]) if "sim" in job else SCENARIOS[scenario]
     controlled, central, warm_edge = ALGOS[algo]
     mcfg = MAPPOConfig(total_steps=job["steps"], seed=seed, centralized_critic=central,
                        callback_every=job.get("eval_every", 50_000), **job.get("mappo", {}))
@@ -131,20 +145,25 @@ def run_jobs(jobs: Sequence[dict], workers: int = 1) -> List[dict]:
 
 
 def evaluate_learned(scenario: str, algo: str, seeds: Sequence[int], out_dir: Path, models_dir: Path,
-                     costs: CostTable, n_episodes: int = 20, name: str = "experiments") -> Tuple[Dict[str, np.ndarray], List[float]]:
+                     costs: CostTable, n_episodes: int = 20, name: str = "experiments",
+                     cfg: Optional[SimConfig] = None) -> Tuple[Dict[str, np.ndarray], List[float]]:
     """Test-episode KPIs of one learned method, concatenated over its training seeds."""
     from .agents.mappo import load_actor
+    cfg = cfg or SCENARIOS[scenario]
     per_seed = []
     for seed in seeds:
-        trained_on = (run_info(out_dir, scenario, algo, seed, name) or {}).get("cost_table", {})
+        info = run_info(out_dir, scenario, algo, seed, name) or {}
+        trained_on = info.get("cost_table", {})
         if trained_on and trained_on["fingerprint"] != costs.fingerprint:
             raise ValueError(f"{name}/{scenario}/{algo}/seed{seed} was trained on cost table {trained_on['source']} "
                              f"({trained_on['fingerprint']}), not on {costs.source} ({costs.fingerprint})")
+        if "sim" in info.get("job", {}) and SimConfig(**info["job"]["sim"]) != cfg:
+            raise ValueError(f"{name}/{scenario}/{algo}/seed{seed} was trained with {info['job']['sim']}, not {asdict(cfg)}")
         _, paths = run_paths(out_dir, models_dir, scenario, algo, seed, name)
         actors = {a: load_actor(p) for a, p in paths.items()}
         dev = (lambda obs, env, m=actors["device"]: m.act(obs["device"]))
         edge = (lambda obs, env, m=actors["edge"]: m.act(obs["edge"])) if "edge" in actors else edge_rule
-        per_seed.append(evaluate(dev, edge, costs=costs, cfg=SCENARIOS[scenario], n_episodes=n_episodes, seed0=TEST_SEED0))
+        per_seed.append(evaluate(dev, edge, costs=costs, cfg=cfg, n_episodes=n_episodes, seed0=TEST_SEED0))
     return concat(per_seed), [float(r["return"].mean()) for r in per_seed]
 
 
@@ -161,33 +180,36 @@ def validation_references(costs: CostTable, cfg: SimConfig, n_episodes: int = 10
 def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], seeds: Sequence[int], steps: int,
                    out_dir: Path = Path("results"), models_dir: Path = Path("models"), workers: int = 1,
                    train: bool = True, n_episodes: int = 20, eval_every: int = 50_000, mappo: Optional[dict] = None,
-                   cost_table: Optional[str] = None, log: Callable = print) -> str:
+                   cost_table: Optional[str] = None, budget_fraction: Optional[float] = None, log: Callable = print) -> str:
     """Train (optionally), evaluate against the baselines and write results/<name>*.md|csv|json + figures."""
     from .evaluate import save_results, summarize
     out_dir, models_dir = Path(out_dir), Path(models_dir)
     mappo = dict(DEFAULT_MAPPO if mappo is None else mappo)
     costs = CostTable.load(cost_table)
+    configs = scenario_configs(costs, budget_fraction)
     if train:
         jobs = [{"name": name, "scenario": s, "algo": a, "seed": k, "steps": steps, "eval_every": eval_every, "mappo": mappo,
-                 "cost_table": cost_table, "out_dir": str(out_dir), "models_dir": str(models_dir)}
+                 "cost_table": cost_table, "sim": asdict(configs[s]), "out_dir": str(out_dir), "models_dir": str(models_dir)}
                 for s in scenarios for a in algos for k in seeds]
         log(f"[experiment] {len(jobs)} training runs on {workers} worker(s)")
         t0 = time.time(); run_jobs(jobs, workers); log(f"[experiment] training took {time.time() - t0:.0f}s")
     sections, curves, refs, runs = [], {}, {}, []
     for s in scenarios:
-        cfg = SCENARIOS[s]
+        cfg = configs[s]
         best = best_static(costs, cfg)
         results = evaluate_baselines(costs, cfg, n_episodes, best)
         ref = next(n for n in results if n.startswith("best static"))
         seed_rows = []
         for a in algos:
-            res, per_seed = evaluate_learned(s, a, seeds, out_dir, models_dir, costs, n_episodes, name)
+            res, per_seed = evaluate_learned(s, a, seeds, out_dir, models_dir, costs, n_episodes, name, cfg)
             results[LABELS[a]] = res
             info = [run_info(out_dir, s, a, k, name) or {} for k in seeds]
             runs += [i for i in info if i]
             seed_rows.append(f"| {LABELS[a]} | " + " | ".join(
                 f"{m:.1f} (checkpoint {i.get('selected_steps', 0) / 1e3:.0f}k)" for m, i in zip(per_seed, info)) + " |")
-        header = (f"### Scenario `{s}` (battery {cfg.battery_mj / 1000:.0f} J per {cfg.horizon} s episode)\n\n"
+        rule = (f", {100 * budget_fraction:.0f} % of the energy of the best fixed configuration in `default`"
+                if budget_fraction is not None and cfg != SCENARIOS[s] else "")
+        header = (f"### Scenario `{s}` (battery {cfg.battery_mj / 1000:g} J per {cfg.horizon} s episode{rule})\n\n"
                   f"Mean ± std over {n_episodes} test episodes (seeds {TEST_SEED0}+; learned methods: pooled over "
                   f"{len(seeds)} training seeds, actors from each run's best validation evaluation). Δ return: paired "
                   f"difference vs `{ref}` with 95 % CI.")

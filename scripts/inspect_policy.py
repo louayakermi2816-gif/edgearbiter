@@ -15,8 +15,8 @@ from edgearbiter.agents.mappo import load_actor
 from edgearbiter.baselines import I
 from edgearbiter.costs import CostTable
 from edgearbiter.evaluate import TEST_SEED0
-from edgearbiter.experiments import ALGOS, SCENARIOS, run_paths
-from edgearbiter.sim.env import RATES, EdgeArbiterEnv, edge_rule
+from edgearbiter.experiments import ALGOS, SCENARIOS, run_info, run_paths
+from edgearbiter.sim.env import RATES, EdgeArbiterEnv, SimConfig, edge_rule
 
 
 def main():
@@ -33,7 +33,9 @@ def main():
     args = ap.parse_args()
     _, paths = run_paths(Path(args.out), Path(args.models), args.scenario, args.algo, args.seed, args.name)
     actors = {a: load_actor(p) for a, p in paths.items()}
-    env = EdgeArbiterEnv(CostTable.load(args.cost_table), SCENARIOS[args.scenario])
+    job = (run_info(Path(args.out), args.scenario, args.algo, args.seed, args.name) or {}).get("job", {})
+    cfg = SimConfig(**job["sim"]) if "sim" in job else SCENARIOS[args.scenario]          # the run's own budget
+    env = EdgeArbiterEnv(CostTable.load(args.cost_table or job.get("cost_table")), cfg)
     tiers = [t["name"] for t in env.costs.tiers]
     rows = []
     for ep in range(args.episodes):
