@@ -1,4 +1,6 @@
-"""Benchmark the candidate models and (re)build results/cost_table.json.
+"""Benchmark the candidate models; build the simulator's cost table (results/cost_table.json).
+
+The cost table is only (re)written by --merge, or by a device run with --write-table.
 
     python scripts/run_benchmark.py                       # device role, with Imagenette accuracy if downloadable
     python scripts/run_benchmark.py --role edge           # run on the edge host, then merge with --merge
@@ -66,6 +68,8 @@ def main():
     ap.add_argument("--tag", default=None, help="suffix of the output files: benchmark_<role>_<tag>.*")
     ap.add_argument("--out", default="results")
     ap.add_argument("--merge", nargs=2, metavar=("DEVICE_JSON", "EDGE_JSON"))
+    ap.add_argument("--write-table", action="store_true",
+                    help="device run without --tag: also rebuild results/cost_table.json from it")
     args = ap.parse_args()
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
 
@@ -86,7 +90,7 @@ def main():
         md = markdown_table(rows, host)
         (out / f"{stem}.md").write_text(md, encoding="utf-8")
         print(md)
-        if args.role != "device" or args.tag:
+        if args.role != "device" or args.tag or not args.write_table:
             return
         tiers, selection = tier_models(args.tiers, rows)
         missing = [m for m in tiers.values() if m not in {r["model"] for r in rows}]
