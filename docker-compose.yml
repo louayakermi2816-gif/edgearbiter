@@ -4,6 +4,11 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_TOPIC: edgearbiter
+      # trained actors (scripts/run_experiments.py); without them the rule-based policies answer
+      # MODEL_DEVICE: /app/models/default/mappo_seed0_device.pt
+      # MODEL_EDGE: /app/models/default/mappo_seed0_edge.pt
+    volumes:
+      - ./models:/app/models:ro
     ports: ["8000:8000"]
     depends_on: [mosquitto]
 

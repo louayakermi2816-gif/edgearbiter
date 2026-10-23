@@ -1,10 +1,11 @@
-"""Benchmark helpers on a tiny random model and synthetic data (no downloads)."""
+"""Benchmark helpers on tiny / random-init models and synthetic data (no downloads)."""
 import pytest
 
 torch = pytest.importorskip("torch")
 import torch.nn as nn
 
-from edgearbiter.benchmark import IMAGENETTE_TO_IMAGENET, imagenette_accuracy, measure_latency, state_dict_size_mb
+from edgearbiter.benchmark import (IMAGENETTE_TO_IMAGENET, benchmark_models, build, build_cost_table, example_input,
+                                   imagenette_accuracy, markdown_table, measure_latency, model_zoo, state_dict_size_mb)
 
 
 def test_measure_latency_and_size():
@@ -20,3 +21,35 @@ def test_imagenette_accuracy_mapping():
             out = torch.zeros(x.shape[0], 1000); out[:, IMAGENETTE_TO_IMAGENET[3]] = 1.0; return out
     loader = [(torch.rand(4, 3, 8, 8), torch.tensor([3, 3, 0, 3]))]
     assert imagenette_accuracy(Oracle(), loader) == pytest.approx(0.75)
+
+
+def test_imagenette_accuracy_native_head():
+    class Native(nn.Module):  # 10-class head, always class 1
+        def forward(self, x):
+            out = torch.zeros(x.shape[0], 10); out[:, 1] = 1.0; return out
+    loader = [(torch.rand(4, 3, 8, 8), torch.tensor([1, 1, 2, 1]))]
+    assert imagenette_accuracy(Native(), loader, imagenet_head=False) == pytest.approx(0.75)
+
+
+def test_random_init_int8_runs_on_its_calibration_engine():
+    spec = model_zoo()["mobilenet_v3_large_int8"]
+    if spec.backend not in torch.backends.quantized.supported_engines:
+        pytest.skip(f"{spec.backend} not available")
+    model = build(spec, pretrained=False)
+    assert torch.backends.quantized.engine == spec.backend == "qnnpack"
+    with torch.no_grad():
+        assert model(example_input(spec)).shape == (1, 1000)
+
+
+def test_benchmark_rows_and_table():
+    rows = benchmark_models(["mobilenet_v3_small"], iters=2, threads=(1, 2), pretrained=False)
+    assert [r["threads"] for r in rows] == [1, 2] and all(r["accuracy"] is None and r["weights"] == "random" for r in rows)
+    md = markdown_table(rows, {"label": None, "cpu": "test-cpu", "logical_cpus": 2, "torch": torch.__version__, "date_utc": "now"})
+    assert "Random-init weights" in md and md.count("| mobilenet_v3_small |") == 2
+
+
+def test_cost_table_uses_the_row_with_most_threads():
+    rows = [{"model": m, "threads": th, "latency_ms": {"p50": lat / th}, "size_mb": 1.0, "accuracy": None}
+            for m, lat in (("mobilenet_v3_small", 20.0), ("mobilenet_v3_large_int8", 40.0), ("resnet18", 100.0)) for th in (1, 4)]
+    table = build_cost_table(rows)
+    assert table["tiers"][2]["latency_ms"]["device"] == 25.0

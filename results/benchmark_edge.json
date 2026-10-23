@@ -1,0 +1,286 @@
+{
+ "host": {
+  "label": "cloud VM, 4 vCPU (edge-server stand-in)",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "logical_cpus": 4,
+  "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+  "python": "3.13.17",
+  "torch": "2.14.1+cu130",
+  "torchvision": "0.29.1+cu130",
+  "date_utc": "2026-10-23T15:55:38Z"
+ },
+ "rows": [
+  {
+   "model": "mobilenet_v3_small",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 11.94241649994865,
+    "p95": 13.938573900009033,
+    "mean": 12.210457450006516
+   },
+   "size_mb": 10.3,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_small",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 13.874208499998986,
+    "p95": 19.24683560002336,
+    "mean": 14.674356699997588
+   },
+   "size_mb": 10.3,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 25.947355499965852,
+    "p95": 34.64974854998104,
+    "mean": 27.061914849999766
+   },
+   "size_mb": 22.13,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 25.027480000062496,
+    "p95": 36.18900084999836,
+    "mean": 28.377009819998875
+   },
+   "size_mb": 22.13,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "qnnpack",
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 36.130269000011594,
+    "p95": 50.68441739992977,
+    "mean": 38.79989943999021
+   },
+   "size_mb": 5.65,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_large_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "qnnpack",
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 36.50452100004031,
+    "p95": 54.50685424997346,
+    "mean": 40.24015947000066
+   },
+   "size_mb": 5.65,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 73.38419950002617,
+    "p95": 94.41809175000913,
+    "mean": 75.73130907999598
+   },
+   "size_mb": 46.84,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 30.900402499923985,
+    "p95": 38.14549370003988,
+    "mean": 31.191995110000335
+   },
+   "size_mb": 46.84,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "fbgemm",
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 20.61140900002556,
+    "p95": 31.864471199941136,
+    "mean": 22.31650279999485
+   },
+   "size_mb": 11.84,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "resnet18_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "fbgemm",
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 10.923386499996468,
+    "p95": 14.990405349971065,
+    "mean": 11.062500189997309
+   },
+   "size_mb": 11.84,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "efficientnet_b0",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 51.36231849996875,
+    "p95": 62.95972129995562,
+    "mean": 52.475317830003405
+   },
+   "size_mb": 21.45,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "efficientnet_b0",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 224,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 40.1697384999693,
+    "p95": 52.88338284995006,
+    "mean": 40.46623673999875
+   },
+   "size_mb": 21.45,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 320,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 117.14472899996053,
+    "p95": 166.9921276499451,
+    "mean": 124.15058014000013
+   },
+   "size_mb": 14.06,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 320,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 108.05492299999742,
+    "p95": 148.6947300000054,
+    "mean": 113.11966020000115
+   },
+   "size_mb": 14.06,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_small_imagenette",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 128,
+   "threads": 1,
+   "latency_ms": {
+    "p50": 8.850390000020525,
+    "p95": 11.634882800052534,
+    "mean": 9.295746880005709
+   },
+   "size_mb": 6.24,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "mobilenet_v3_small_imagenette",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "weights": "random",
+   "img": 128,
+   "threads": 4,
+   "latency_ms": {
+    "p50": 9.667111999988265,
+    "p95": 14.030464449979263,
+    "mean": 10.455488899995089
+   },
+   "size_mb": 6.24,
+   "accuracy": null,
+   "accuracy_metric": null
+  }
+ ]
+}
