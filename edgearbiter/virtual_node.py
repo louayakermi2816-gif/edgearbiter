@@ -25,6 +25,7 @@ import argparse
 import json
 import threading
 import time
+from dataclasses import replace
 from typing import Callable, Optional
 
 from .costs import CostTable
@@ -198,11 +199,16 @@ def main():
     ap.add_argument("--steps", type=int, default=None, help="stop after this many intervals (default: run forever)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--scenario", choices=list(SCENARIOS), default="default")
+    ap.add_argument("--battery-j", type=float, default=None,
+                    help="energy budget per episode instead of the scenario's (e.g. the one a study was trained with)")
     ap.add_argument("--api", default=None, help="call the policy service directly, e.g. http://localhost:8000")
     ap.add_argument("--cost-table", default=None)
     args = ap.parse_args()
+    cfg = SCENARIOS[args.scenario]
+    if args.battery_j:
+        cfg = replace(cfg, battery_mj=1000.0 * args.battery_j)
     node = VirtualNode(args.broker or None, args.port, args.topic, args.node_id, args.interval, args.timeout, args.seed,
-                       CostTable.load(args.cost_table), SCENARIOS[args.scenario], api=args.api)
+                       CostTable.load(args.cost_table), cfg, api=args.api)
     print(f"[virtual-node] {args.node_id}: broker={args.broker or '-'} api={args.api or '-'} interval={args.interval}s")
     try:
         print(json.dumps(node.run(args.steps), indent=1))
