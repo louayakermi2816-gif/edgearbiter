@@ -81,3 +81,18 @@ def test_cost_table_uses_the_row_with_most_threads():
             for m, lat in (("mobilenet_v3_small", 20.0), ("mobilenet_v3_large_int8", 40.0), ("resnet18", 100.0)) for th in (1, 4)]
     table = build_cost_table(rows)
     assert table["tiers"][2]["latency_ms"]["device"] == 25.0
+
+
+def test_deployed_int8_model_is_restored_from_the_saved_calibration(tmp_path):
+    from edgearbiter.benchmark import int8_state_path, load_model
+    from edgearbiter.finetune import build_model, checkpoint_path
+    from edgearbiter.quantize import quantize_ptq
+    torch.manual_seed(0)
+    fp32 = build_model(pretrained=False).eval()                        # stands in for a trained checkpoint
+    torch.save(fp32.state_dict(), checkpoint_path(str(tmp_path), "scratch"))
+    q = quantize_ptq(fp32, [(torch.rand(4, 3, 128, 128), None) for _ in range(2)], backend="x86", batches=2, img=128)
+    torch.save(q.state_dict(), int8_state_path(str(tmp_path), "mobilenet_v3_small_imagenette_scratch_int8"))
+    deployed = load_model("mobilenet_v3_small_imagenette_scratch_int8", str(tmp_path))
+    x = torch.rand(2, 3, 128, 128)
+    assert torch.equal(deployed(x), q(x))
+    assert torch.equal(load_model("mobilenet_v3_small_imagenette_scratch", str(tmp_path))(x), fp32(x))

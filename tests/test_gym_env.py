@@ -1,4 +1,5 @@
 """The single-agent Gymnasium view of the simulator is a valid gymnasium.Env."""
+import pytest
 from gymnasium.utils.env_checker import check_env
 
 from edgearbiter.costs import CostTable
@@ -20,3 +21,11 @@ def test_seeded_and_runs_to_the_horizon():
             rewards.append(r); done = term or trunc
         runs.append(rewards)
     assert runs[0] == runs[1] and len(runs[0]) == 25 and info["kpis"]["t"] == 25
+
+
+def test_stable_baselines3_trains_on_it():
+    sb3 = pytest.importorskip("stable_baselines3")                 # optional: not a project dependency
+    env = DeviceEnv(CostTable.synthetic(), SimConfig(horizon=30))
+    model = sb3.PPO("MlpPolicy", env, n_steps=64, batch_size=32, n_epochs=1, seed=0, device="cpu").learn(128)
+    obs, _ = env.reset(seed=1)
+    assert env.action_space.contains(int(model.predict(obs, deterministic=True)[0]))

@@ -37,3 +37,11 @@ def quantize_ptq(model: torch.nn.Module, calib_loader, backend: Optional[str] = 
         quantized = convert_fx(prepared)
     quantized.quant_engine = engine
     return quantized.eval()
+
+
+def load_quantized(model: torch.nn.Module, state_path, backend: Optional[str] = None, img: int = 128) -> torch.nn.Module:
+    """INT8 model from a saved `quantize_ptq` state: FX graph modules do not pickle, so the INT8 graph is
+    rebuilt (uncalibrated) from the FP32 `model` and the calibrated weights and scales are loaded into it."""
+    quantized = quantize_ptq(model, [(torch.rand(1, 3, img, img), None)], backend=backend, batches=1, img=img)
+    quantized.load_state_dict(torch.load(state_path, weights_only=False))
+    return quantized

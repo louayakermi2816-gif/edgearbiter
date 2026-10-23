@@ -3,8 +3,9 @@
 For each model we measure:
     latency_ms   p50 / p95 / mean over N single-image inferences (after warm-up), batch size 1,
                  at the model's input resolution, for each requested thread count
-    memory       peak resident memory of a fresh process that loads the model and runs the
-                 timed inferences, minus the process baseline (`edgearbiter.bench_worker`)
+    memory       what the deployed model needs, in a fresh process (`edgearbiter.bench_worker`):
+                 its weights plus the resident memory that running it adds (activations,
+                 workspace, kernel caches), peak over the timed inferences
     size_mb      serialised state_dict size (weights on disk)
     accuracy     top-1 on the Imagenette validation split: native 10-class heads for the models
                  trained by `edgearbiter.finetune`; ImageNet-pretrained heads restricted to the 10
@@ -117,6 +118,25 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
 
 # architectures of the Imagenette tiers, smallest first (see deployment_tiers)
 LADDER = (("tiny", "mobilenet_v3_small"), ("small", "mobilenet_v3_large"), ("medium", "resnet18"))
+
+
+def int8_state_path(models_dir: str, name: str) -> Path:
+    """Where the benchmark saves the calibrated state of a post-training INT8 model (`ModelSpec.ptq`)."""
+    return Path(models_dir) / f"{name}.pt"
+
+
+def load_model(name: str, models_dir: str = "models") -> torch.nn.Module:
+    """A model of the zoo with its trained / pretrained weights, as deployed: post-training INT8 models are
+    restored from the state the benchmark saved (`int8_state_path`)."""
+    spec = model_zoo(models_dir)[name]
+    model = build(spec, pretrained=True)
+    if spec.ptq:
+        from .quantize import load_quantized
+        path = int8_state_path(models_dir, name)
+        if not path.exists():
+            raise FileNotFoundError(f"{path} not found: run scripts/run_benchmark.py on {name} first (it calibrates it)")
+        model = load_quantized(model, path, spec.backend, spec.img)
+    return model
 
 
 def set_quant_engine(preferred: Optional[str] = None) -> str:
@@ -236,7 +256,9 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                 key = ("train", spec.img)
                 loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True))
                 model = quantize_ptq(model, loaders[key], backend=spec.backend, batches=calib_batches, img=spec.img)
-                int8_state = str(Path(tmp) / f"{name}.pt"); torch.save(model.state_dict(), int8_state)
+                # trained weights: keep the calibrated model for deployment (API /infer); random ones: temporary
+                int8_state = str(int8_state_path(models_dir, name) if pretrained else Path(tmp) / f"{name}.pt")
+                torch.save(model.state_dict(), int8_state)
             acc = None
             if pretrained and data_root and not spec.detector:
                 key = ("val", spec.img)
@@ -253,7 +275,8 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                              "quantisation": ("PTQ (FX)" if spec.ptq else "torchvision") if spec.backend else None,
                              "weights": "random" if not pretrained else label, "img": spec.img, "threads": m["threads"],
                              "cpu_quota": cpu_quota, "latency_ms": m["latency_ms"], "size_mb": size,
-                             "memory_mb": m["model_mem_mb"], "rss_peak_mb": m["rss_peak_mb"], "accuracy": acc,
+                             "memory_mb": m["model_mem_mb"], "inference_mem_mb": m["inference_mem_mb"],
+                             "rss_peak_mb": m["rss_peak_mb"], "accuracy": acc,
                              "accuracy_metric": ("imagenette_10way_top1" if acc is not None else None)})
                 lat = m["latency_ms"]
                 print(f"    threads {m['threads']}{f' @ {cpu_quota:g} CPU' if cpu_quota else ''}: p50 {lat['p50']:.1f} ms  "

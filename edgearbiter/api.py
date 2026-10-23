@@ -125,14 +125,14 @@ async def infer(file: UploadFile = File(...), tier: int = 0, topk: int = 5):
     try:
         import torch
         from PIL import Image
-        from .benchmark import build, model_zoo, set_quant_engine
+        from .benchmark import load_model, model_zoo, set_quant_engine
         from .data import eval_transform, class_names
     except Exception as exc:
         raise HTTPException(503, f"inference dependencies missing: {exc}")
     spec = model_zoo()[_costs.tiers[tier]["model"]]
     if tier not in _models:
         try:
-            _models[tier] = build(spec, pretrained=True)
+            _models[tier] = load_model(_costs.tiers[tier]["model"])
         except Exception as exc:
             raise HTTPException(503, f"model weights unavailable: {exc}")
     if spec.backend:

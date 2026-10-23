@@ -5,15 +5,20 @@ not polluted by other models and the CPU limit applies to this measurement only:
 
     python -m edgearbiter.bench_worker '{"model": "resnet18", "pretrained": false, "threads": 1, ...}'
 
-Memory: `rss_baseline_mb` is the resident memory of the process after importing torch,
-`rss_peak_mb` its peak while building the model and running the timed inferences;
-`model_mem_mb` = peak - baseline is the memory the model needs (weights, activations,
-workspace). On Linux the kernel's high-water mark is reset after the baseline
-(/proc/self/clear_refs), so import-time peaks do not hide the model; elsewhere a thread
-samples the resident memory every millisecond.
+Memory: `model_mem_mb` = `weights_mb` + `inference_mem_mb`, what the deployed model needs:
+its weights (serialised state) plus the resident memory that running it adds (activations,
+workspace, kernel caches): the peak during the timed inferences minus the resident memory of
+the process with the model loaded. Building the model is excluded on purpose: the INT8 models
+are rebuilt through FX quantisation, whose toolchain costs ~180 MB on first use and keeps
+~15 MB of each graph it builds, none of which a deployed model carries. `rss_baseline_mb`
+(torch imported) and `rss_loaded_mb` (model loaded, garbage collected and returned to the OS)
+are reported for reference. The peak is the kernel's high-water mark on Linux (reset through
+/proc/self/clear_refs); elsewhere a thread samples the resident memory every millisecond.
 """
 from __future__ import annotations
 
+import ctypes
+import gc
 import json
 import sys
 import threading
@@ -35,16 +40,21 @@ class PeakMemory:
 
     def __init__(self):
         self.proc, self.hwm = STATUS.exists(), False
+        self.restart()
+        self.baseline = self.current()
+        self._stop = threading.Event()
+        if not self.hwm:
+            threading.Thread(target=self._sample, daemon=True).start()
+
+    def restart(self) -> None:
+        """Forget the peak so far: from now on the peak starts at the current resident memory."""
         if self.proc:
             try:
                 Path("/proc/self/clear_refs").write_text("5")            # reset VmHWM to the current RSS
                 self.hwm = True
             except OSError:
                 pass
-        self.baseline = self.current()
-        self._max, self._stop = self.baseline, threading.Event()
-        if not self.hwm:
-            threading.Thread(target=self._sample, daemon=True).start()
+        self._max = self.current()
 
     def current(self) -> float:
         if self.proc:
@@ -63,6 +73,29 @@ class PeakMemory:
         return max(self._max, self.current())
 
 
+def release_garbage() -> None:
+    """Collect garbage and hand freed heap memory back to the OS, so it does not count as resident."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):                                   # not glibc
+        pass
+
+
+def load_quantization_toolchain() -> None:
+    """Quantise a two-layer model (FX and eager mode): imports what INT8 models need on first use."""
+    import torch
+    from .quantize import quantize_ptq
+    tiny = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 3), torch.nn.ReLU()).eval()
+    x = torch.rand(1, 3, 16, 16)
+    with torch.no_grad():
+        quantize_ptq(tiny, [(x, None)], batches=1, img=16)(x)
+        eager = torch.ao.quantization.QuantWrapper(torch.nn.Sequential(torch.nn.Conv2d(3, 4, 3), torch.nn.ReLU())).eval()
+        eager.qconfig = torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine)
+        prepared = torch.ao.quantization.prepare(eager); prepared(x)
+        torch.ao.quantization.convert(prepared)(x)
+
+
 def run(job: dict) -> dict:
     import torch
     from .benchmark import build, example_input, measure_latency, model_zoo
@@ -70,20 +103,26 @@ def run(job: dict) -> dict:
     with torch.no_grad():
         torch.ones(8, 8) @ torch.ones(8, 8)                      # initialise the runtime before the baseline
     spec = model_zoo(job.get("models_dir", "models"))[job["model"]]
+    load_quantization_toolchain()                                # part of the baseline, not of the model
+    release_garbage()
     mem = PeakMemory()
+    baseline = mem.baseline
     model = build(spec, job.get("pretrained", True))
     if job.get("int8_state"):                                    # FX post-training quantised weights + scales
-        from .quantize import quantize_ptq
-        model = quantize_ptq(model, [(torch.rand(1, 3, spec.img, spec.img), None)], backend=job.get("engine"), batches=1,
-                             img=spec.img)
-        model.load_state_dict(torch.load(job["int8_state"], weights_only=False))
+        from .quantize import load_quantized
+        model = load_quantized(model, job["int8_state"], job.get("engine"), spec.img)
+    release_garbage(); mem.restart()                             # memory of the loaded model, not of building it
+    loaded = mem.current()
     if job.get("cgroup_procs"):                                  # emulated device: CPU limit for the timed part
         from .cpulimit import join
         join(job["cgroup_procs"])
     lat = measure_latency(model, example_input(spec), iters=int(job.get("iters", 50)), warmup=int(job.get("warmup", 10)))
     peak = mem.peak()
-    return {"latency_ms": lat, "rss_baseline_mb": round(mem.baseline, 1), "rss_peak_mb": round(peak, 1),
-            "model_mem_mb": round(peak - mem.baseline, 1), "threads": torch.get_num_threads(),
+    from .benchmark import state_dict_size_mb
+    weights = state_dict_size_mb(model)
+    return {"latency_ms": lat, "rss_baseline_mb": round(baseline, 1), "rss_loaded_mb": round(loaded, 1),
+            "rss_peak_mb": round(peak, 1), "weights_mb": round(weights, 2), "inference_mem_mb": round(peak - loaded, 1),
+            "model_mem_mb": round(weights + peak - loaded, 1), "threads": torch.get_num_threads(),
             "quant_engine": torch.backends.quantized.engine if (spec.backend or job.get("int8_state")) else None}
 
 
