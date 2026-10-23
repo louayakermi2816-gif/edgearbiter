@@ -1,6 +1,7 @@
 """Learning-curve figures (matplotlib), rendered once for a light and once for a dark background.
 
-Colours follow a validated categorical order (blue, orange, aqua - CVD-safe in both modes);
+Colours follow a validated categorical order (blue, orange, aqua, yellow - adjacent pairs CVD-safe in
+both modes, at most four series, never cycled);
 reference lines for the baselines are drawn in muted ink and labelled directly. The tables
 in results/*.md are the text equivalent of every figure.
 """
@@ -11,9 +12,9 @@ from typing import Dict, Optional
 
 THEMES = {
     "light": {"surface": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "muted": "#898781", "grid": "#e1e0d9",
-              "axis": "#c3c2b7", "series": ["#2a78d6", "#eb6834", "#1baf7a"]},
+              "axis": "#c3c2b7", "series": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]},
     "dark": {"surface": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "muted": "#898781", "grid": "#2c2c2a",
-             "axis": "#383835", "series": ["#3987e5", "#d95926", "#199e70"]},
+             "axis": "#383835", "series": ["#3987e5", "#d95926", "#199e70", "#c98500"]},
 }
 
 
@@ -45,7 +46,7 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
             x = [s / 1e6 for s in c["steps"]]
             lo = [m - s for m, s in zip(c["mean"], c["std"])]
             hi = [m + s for m, s in zip(c["mean"], c["std"])]
-            color = t["series"][i % len(t["series"])]
+            color = t["series"][i]
             ax.fill_between(x, lo, hi, color=color, alpha=0.10, linewidth=0)
             ax.plot(x, c["mean"], color=color, linewidth=2, solid_capstyle="round", solid_joinstyle="round",
                     label=f"{labels.get(algo, algo)} (n={c['n_seeds']})")
@@ -59,9 +60,10 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
         for name, value in refs:          # label above its line, or below it when the line above is too close
             below = prev is not None and prev - value < 0.06 * (hi_y - lo_y)
             ax.axhline(value, color=t["muted"], linewidth=1)
-            ax.annotate(f"{name} {value:.0f}", xy=(1, value), xycoords=("axes fraction", "data"),
-                        xytext=(-4, -3 if below else 3), textcoords="offset points", fontsize=8.5, color=t["ink2"],
-                        ha="right", va="top" if below else "bottom")
+            ax.annotate(f"{name} {value:.0f}", xy=(0, value), xycoords=("axes fraction", "data"),
+                        xytext=(6, -3 if below else 3), textcoords="offset points", fontsize=8.5, color=t["ink2"],
+                        ha="left", va="top" if below else "bottom", zorder=5,
+                        bbox={"boxstyle": "square,pad=0.15", "facecolor": t["surface"], "edgecolor": "none", "alpha": 0.85})
             prev = value
         ax.set_title(scenario.replace("_", " "), color=t["ink"], fontsize=11, loc="left", pad=8)
         ax.set_xlabel("environment steps (millions)", color=t["ink2"], fontsize=9)

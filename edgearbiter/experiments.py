@@ -167,7 +167,7 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
                 for s in scenarios for a in algos for k in seeds]
         log(f"[experiment] {len(jobs)} training runs on {workers} worker(s)")
         t0 = time.time(); run_jobs(jobs, workers); log(f"[experiment] training took {time.time() - t0:.0f}s")
-    sections, curves, refs = [], {}, {}
+    sections, curves, refs, runs = [], {}, {}, []
     for s in scenarios:
         cfg = SCENARIOS[s]
         best = best_static(costs, cfg)
@@ -177,7 +177,10 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
         for a in algos:
             res, per_seed = evaluate_learned(s, a, seeds, out_dir, models_dir, costs, n_episodes)
             results[LABELS[a]] = res
-            seed_rows.append(f"| {LABELS[a]} | " + " | ".join(f"{m:.1f}" for m in per_seed) + " |")
+            info = [run_info(out_dir, s, a, k) or {} for k in seeds]
+            runs += [i for i in info if i]
+            seed_rows.append(f"| {LABELS[a]} | " + " | ".join(
+                f"{m:.1f} (checkpoint {i.get('selected_steps', 0) / 1e3:.0f}k)" for m, i in zip(per_seed, info)) + " |")
         header = (f"### Scenario `{s}` (battery {cfg.battery_mj / 1000:.0f} J per {cfg.horizon} s episode)\n\n"
                   f"Mean ± std over {n_episodes} test episodes (seeds {TEST_SEED0}+; learned methods: pooled over "
                   f"{len(seeds)} training seeds, actors from each run's best validation evaluation). Δ return: paired "
@@ -185,7 +188,8 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
         save_results(results, out_dir, f"{name}_{s}", ref=ref, header=header)
         per_seed_table = ("| method | " + " | ".join(f"seed {k}" for k in seeds) + " |\n|" + "---|" * (len(seeds) + 1)
                           + "\n" + "\n".join(seed_rows))
-        sections.append(f"{header}\n\n{summarize(results, ref)}\n\nTest return per training seed:\n\n{per_seed_table}")
+        sections.append(f"{header}\n\n{summarize(results, ref)}\n\nTest return per training seed (step of the selected "
+                        f"checkpoint):\n\n{per_seed_table}")
         curves[s] = {a: load_curves(out_dir, s, a, seeds) for a in algos}
         refs[s] = validation_references(costs, cfg, best=best)
     figure = ""
@@ -199,10 +203,19 @@ def run_experiment(name: str, algos: Sequence[str], scenarios: Sequence[str], se
                   "on the same validation episodes.\n\n")
     except ImportError:
         log("[experiment] matplotlib not installed: figures skipped")
-    report = (f"## {name.replace('_', ' ')}\n\nCost table: `{costs.source}` · {len(seeds)} seeds × {steps:,} steps per "
-              f"method · trainer overrides: `{mappo}`\n\n{figure}" + "\n\n".join(sections) + "\n")
+    budgets = sorted({r["job"]["steps"] for r in runs}) or [steps]           # what the saved runs were trained with
+    overrides = runs[0]["job"].get("mappo", mappo) if runs else mappo
+    report = (f"## {name.replace('_', ' ')}\n\nCost table: `{costs.source}` · {len(seeds)} seeds × "
+              f"{' / '.join(f'{b:,}' for b in budgets)} steps per run · trainer overrides: `{overrides}`\n\n{figure}"
+              + "\n\n".join(sections) + "\n")
     (out_dir / f"{name}.md").write_text(report, encoding="utf-8")
     return report
+
+
+def run_info(out_dir: Path, scenario: str, algo: str, seed: int) -> Optional[dict]:
+    """The saved record of one training run (job, config, learning curve, selected checkpoint)."""
+    path, _ = run_paths(out_dir, Path("."), scenario, algo, seed)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 def load_curves(out_dir: Path, scenario: str, algo: str, seeds: Sequence[int]) -> Optional[dict]:
