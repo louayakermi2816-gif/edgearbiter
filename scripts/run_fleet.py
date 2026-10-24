@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--episodes", type=int, default=20, help="test episodes per evaluation")
     ap.add_argument("--eval-every", type=int, default=50_000)
     ap.add_argument("--skip-training", action="store_true")
+    ap.add_argument("--train-only", action="store_true", help="train, but leave the evaluation and the report for later")
     ap.add_argument("--no-transfer", action="store_true", help="skip the single-device PPO baseline")
     ap.add_argument("--budget-fraction", type=float, default=0.7)
     ap.add_argument("--cost-table", default=None)
@@ -36,7 +37,7 @@ def main():
     print(run_fleet_study(args.algos, args.seeds, args.steps, out_dir=args.out, models_dir=args.models,
                           workers=args.workers, train=not args.skip_training, n_episodes=args.episodes,
                           eval_every=args.eval_every, cost_table=args.cost_table, budget_fraction=args.budget_fraction,
-                          name=args.name, transfer=not args.no_transfer))
+                          name=args.name, transfer=not args.no_transfer, evaluate=not args.train_only))
 
 
 if __name__ == "__main__":

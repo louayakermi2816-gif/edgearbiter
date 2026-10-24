@@ -4,6 +4,8 @@ Questions, on the measured cost table with the energy-constrained per-device bud
     - does training the devices together beat deploying the single-device policy on each device?
     - does a learned edge (per-device admission) beat the threshold rule?   (edge rule vs learned edge)
     - does a centralised critic help?                                        (IPPO vs MAPPO)
+    - does joint training improve on the single-device policy when the devices start from it?
+      (`*_warm`: devices behaviour-cloned from the single-device PPO actors, then trained jointly)
 Same protocol as `experiments.py`: validation episodes for learning curves, model selection and the
 best static configuration; held-out test episodes for the tables, paired against the best static policy.
 """
@@ -27,14 +29,19 @@ from .sim.env import RATES, SimConfig
 from .sim.fleet import PROFILES, FleetEnv, fleet_edge_rule, link_aware_edge_rule, on_every_device
 
 FLEET_KPIS = KPIS + ["alive"]
-ALGOS = {   # name -> (the edge learns, centralised critic); the devices always learn
-    "ippo_devices": (False, False),
-    "mappo_devices": (False, True),
-    "ippo": (True, False),
-    "mappo": (True, True),
+ALGOS = {   # name -> (the edge learns, centralised critic, devices start from the single-device actors)
+    "ippo_devices": (False, False, False),
+    "mappo_devices": (False, True, False),
+    "ippo": (True, False, False),
+    "mappo": (True, True, False),
+    "ippo_warm": (True, False, True),
+    "mappo_warm": (True, True, True),
 }
 LABELS = {"ippo_devices": "IPPO, devices (edge rule)", "mappo_devices": "MAPPO, devices (edge rule)",
-          "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge"}
+          "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge",
+          "ippo_warm": "IPPO, devices + edge, from single-device actors",
+          "mappo_warm": "MAPPO, devices + edge, from single-device actors"}
+COLORS = {"ippo_devices": 0, "mappo_devices": 1, "ippo": 2, "mappo": 3, "ippo_warm": 2, "mappo_warm": 3}
 SCENARIO = "energy_constrained"
 
 
@@ -69,8 +76,12 @@ def train_fleet_run(job: dict) -> dict:
     algo, seed = job["algo"], job["seed"]
     costs, cfg = CostTable.load(job.get("cost_table")), SimConfig(**job["sim"])
     env = FleetEnv(costs, cfg, job.get("profiles", PROFILES))
-    learn_edge, central = ALGOS[algo]
+    learn_edge, central, warm = ALGOS[algo]
     controlled = env.devices + (["edge"] if learn_edge else [])
+    teachers = {"edge": fleet_edge_rule} if learn_edge else {}
+    if warm:                                   # every device starts as the single-device PPO actor of the same seed
+        actor = _single_device_actor(Path(job["out_dir"]), Path(job["models_dir"]), seed, costs, cfg)
+        teachers.update({d: (lambda obs, e, _d=d: actor.act(obs[_d])) for d in env.devices})
     mcfg = MAPPOConfig(total_steps=job["steps"], seed=seed, centralized_critic=central,
                        callback_every=job.get("eval_every", 50_000), **job.get("mappo", {}))
     curve, best, t0 = [], {"return": -np.inf, "steps": 0, "state": None}, time.time()
@@ -87,7 +98,7 @@ def train_fleet_run(job: dict) -> dict:
 
     actors, _, _ = train_mappo(env, mcfg, controlled=controlled,
                                fixed_policies=None if learn_edge else {"edge": fleet_edge_rule}, log=None,
-                               callback=on_eval, init_policies={"edge": fleet_edge_rule} if learn_edge else None)
+                               callback=on_eval, init_policies=teachers or None)
     if best["state"] is not None:
         for a, m in actors.items():
             m.load_state_dict(best["state"][a])
@@ -127,14 +138,19 @@ def _learned_policies(out_dir: Path, models_dir: Path, algo: str, seed: int, nam
     return pol if "edge" in pol else {**pol, "edge": fleet_edge_rule}
 
 
-def _single_device_ppo(out_dir: Path, models_dir: Path, seed: int, costs: CostTable, cfg: SimConfig) -> Callable:
-    """The device actor of the single-device study (PPO, same table and budget), for every device of the fleet."""
+def _single_device_actor(out_dir: Path, models_dir: Path, seed: int, costs: CostTable, cfg: SimConfig):
+    """The device actor of the single-device study (PPO, same cost table and budget)."""
     from .agents.mappo import load_actor
     info = run_info(out_dir, SCENARIO, "ppo", seed, "experiments") or {}
     if info.get("cost_table", {}).get("fingerprint") != costs.fingerprint or SimConfig(**info["job"]["sim"]) != cfg:
         raise ValueError("the single-device PPO actors were trained on another cost table or budget: "
                          "run scripts/run_experiments.py --budget-fraction 0.7 first")
-    actor = load_actor(run_paths(out_dir, models_dir, SCENARIO, "ppo", seed, "experiments")[1]["device"])
+    return load_actor(run_paths(out_dir, models_dir, SCENARIO, "ppo", seed, "experiments")[1]["device"])
+
+
+def _single_device_ppo(out_dir: Path, models_dir: Path, seed: int, costs: CostTable, cfg: SimConfig) -> Callable:
+    """The single-device PPO actor as a device policy (reads obs["device"]), for every device of the fleet."""
+    actor = _single_device_actor(out_dir, models_dir, seed, costs, cfg)
     return lambda obs, env: actor.act(obs["device"])
 
 
@@ -155,7 +171,7 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
                     models_dir: Path = Path("models"), workers: int = 1, train: bool = True, n_episodes: int = 20,
                     eval_every: int = 50_000, cost_table: Optional[str] = None, budget_fraction: float = 0.7,
                     name: str = "fleet", mappo: Optional[dict] = None, transfer: bool = True, val_episodes: int = 10,
-                    log: Callable = print) -> str:
+                    evaluate: bool = True, log: Callable = print) -> str:
     out_dir, models_dir = Path(out_dir), Path(models_dir)
     costs = CostTable.load(cost_table)
     cfg = scenario_configs(costs, budget_fraction)[SCENARIO]
@@ -167,6 +183,8 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
                 for a in algos for k in seeds]
         log(f"[fleet] {len(jobs)} training runs on {workers} worker(s)")
         t0 = time.time(); _run_jobs(jobs, workers); log(f"[fleet] training took {time.time() - t0:.0f}s")
+    if not evaluate:
+        return ""
 
     env = FleetEnv(costs, cfg)
     static_name, static_pol, static_scores = best_static_fleet(costs, cfg, val_episodes)
@@ -187,8 +205,10 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
     if transfer:
         for edge_name, edge in (("edge rule", fleet_edge_rule), ("link-aware edge", link_aware_edge_rule)):
             label = f"single-device PPO on each device ({edge_name})"
-            results[label] = _concat([test({**every(_single_device_ppo(out_dir, models_dir, k, costs, cfg)), "edge": edge})
-                                      for k in seeds])
+            pols = [{**every(_single_device_ppo(out_dir, models_dir, k, costs, cfg)), "edge": edge} for k in seeds]
+            results[label] = _concat([test(p) for p in pols])
+            if edge is fleet_edge_rule:
+                refs["single-device PPO"] = float(np.mean([val(p) for p in pols]))
     seed_rows, curves = [], {}
     for a in algos:
         per_seed = [test(_learned_policies(out_dir, models_dir, a, k, name, costs, cfg)) for k in seeds]
@@ -208,9 +228,13 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
     figure = ""
     try:
         from .plots import learning_curves
+        panels = {"devices from scratch": {a: c for a, c in curves.items() if not ALGOS[a][2]},
+                  "devices from the single-device actors": {a.replace("_warm", ""): c for a, c in curves.items()
+                                                            if ALGOS[a][2]}}
+        panels = {p: c for p, c in panels.items() if c}
         for theme, suffix in (("light", ""), ("dark", "_dark")):
-            learning_curves({"three devices, one edge": curves}, {"three devices, one edge": refs}, LABELS,
-                            out_dir / f"{name}_learning_curves{suffix}.png", theme)
+            learning_curves(panels, {p: refs for p in panels}, LABELS, out_dir / f"{name}_learning_curves{suffix}.png",
+                            theme, colors=COLORS)
         figure = (f'<picture><source media="(prefers-color-scheme: dark)" srcset="{name}_learning_curves_dark.png">'
                   f'<img alt="Validation return vs training steps, three devices sharing one edge" '
                   f'src="{name}_learning_curves.png"></picture>\n\n')

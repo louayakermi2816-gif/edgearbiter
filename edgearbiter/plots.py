@@ -19,10 +19,12 @@ THEMES = {
 
 
 def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Dict[str, Dict[str, float]],
-                    labels: Dict[str, str], out: Path, theme: str = "light") -> Path:
+                    labels: Dict[str, str], out: Path, theme: str = "light", colors: Optional[Dict[str, int]] = None) -> Path:
     """One panel per scenario: validation return vs environment steps (mean ± std over seeds).
 
-    curves[scenario][algo] = {"steps", "mean", "std", "n_seeds"}; references[scenario][name] = return."""
+    curves[scenario][algo] = {"steps", "mean", "std", "n_seeds"}; references[scenario][name] = return.
+    `colors` fixes each algo's series colour across panels (default: its position in the panel); the
+    legend is the first panel's."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -46,7 +48,7 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
             x = [s / 1e6 for s in c["steps"]]
             lo = [m - s for m, s in zip(c["mean"], c["std"])]
             hi = [m + s for m, s in zip(c["mean"], c["std"])]
-            color = t["series"][i]
+            color = t["series"][(colors or {}).get(algo, i)]
             ax.fill_between(x, lo, hi, color=color, alpha=0.10, linewidth=0)
             ax.plot(x, c["mean"], color=color, linewidth=2, solid_capstyle="round", solid_joinstyle="round",
                     label=f"{labels.get(algo, algo)} (n={c['n_seeds']})")
