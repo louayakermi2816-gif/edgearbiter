@@ -1,11 +1,13 @@
-"""Multi-device study: three devices share one edge (`sim/fleet.py`).
+"""Multi-device study: several devices share one edge (`sim/fleet.py`; three by default).
 
 Questions, on the measured cost table with the energy-constrained per-device budget:
     - does training the devices together beat deploying the single-device policy on each device?
     - does a learned edge (per-device admission) beat the threshold rule?   (edge rule vs learned edge)
     - does a centralised critic help?                                        (IPPO vs MAPPO)
     - does joint training improve on the single-device policy when the devices start from it?
-      (`*_warm`: devices behaviour-cloned from the single-device PPO actors, then trained jointly)
+      (`*_warm`: devices behaviour-cloned from the single-device PPO actors, then trained jointly;
+      `*_ft`: the same, with critic-only updates first, so the critics learn the transferred policy's
+      values before it moves)
 Same protocol as `experiments.py`: validation episodes for learning curves, model selection and the
 best static configuration; held-out test episodes for the tables, paired against the best static policy.
 """
@@ -29,19 +31,19 @@ from .sim.env import RATES, SimConfig
 from .sim.fleet import PROFILES, FleetEnv, fleet_edge_rule, link_aware_edge_rule, on_every_device
 
 FLEET_KPIS = KPIS + ["alive"]
-ALGOS = {   # name -> (the edge learns, centralised critic, devices start from the single-device actors)
-    "ippo_devices": (False, False, False),
-    "mappo_devices": (False, True, False),
-    "ippo": (True, False, False),
-    "mappo": (True, True, False),
-    "ippo_warm": (True, False, True),
-    "mappo_warm": (True, True, True),
+BASES = {   # base algorithm -> (the edge learns, centralised critic); the devices always learn
+    "ippo_devices": (False, False), "mappo_devices": (False, True), "ippo": (True, False), "mappo": (True, True)}
+BASE_LABELS = {"ippo_devices": "IPPO, devices (edge rule)", "mappo_devices": "MAPPO, devices (edge rule)",
+               "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge"}
+COLORS = {"ippo_devices": 0, "mappo_devices": 1, "ippo": 2, "mappo": 3}      # a series' colour follows its base
+RECIPES = {   # name suffix -> (how the devices start: figure panel, from the single-device actors, trainer overrides)
+    "": ("devices from scratch", False, {}),
+    "_warm": ("devices from the single-device actors", True, {}),
+    "_ft": ("from the single-device actors, critics warmed up first", True, {"critic_warmup_steps": 100_000}),
 }
-LABELS = {"ippo_devices": "IPPO, devices (edge rule)", "mappo_devices": "MAPPO, devices (edge rule)",
-          "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge",
-          "ippo_warm": "IPPO, devices + edge, from single-device actors",
-          "mappo_warm": "MAPPO, devices + edge, from single-device actors"}
-COLORS = {"ippo_devices": 0, "mappo_devices": 1, "ippo": 2, "mappo": 3, "ippo_warm": 2, "mappo_warm": 3}
+RECIPE_LABELS = {"": "", "_warm": ", from single-device actors", "_ft": ", from single-device actors, critic warm-up"}
+ALGOS = {b + r: (b, r) for r in RECIPES for b in BASES}
+LABELS = {a: BASE_LABELS[b] + RECIPE_LABELS[r] for a, (b, r) in ALGOS.items()}
 SCENARIO = "energy_constrained"
 
 
@@ -76,14 +78,15 @@ def train_fleet_run(job: dict) -> dict:
     algo, seed = job["algo"], job["seed"]
     costs, cfg = CostTable.load(job.get("cost_table")), SimConfig(**job["sim"])
     env = FleetEnv(costs, cfg, job.get("profiles", PROFILES))
-    learn_edge, central, warm = ALGOS[algo]
+    base, recipe = ALGOS[algo]
+    (learn_edge, central), (_, warm, overrides) = BASES[base], RECIPES[recipe]
     controlled = env.devices + (["edge"] if learn_edge else [])
     teachers = {"edge": fleet_edge_rule} if learn_edge else {}
     if warm:                                   # every device starts as the single-device PPO actor of the same seed
         actor = _single_device_actor(Path(job["out_dir"]), Path(job["models_dir"]), seed, costs, cfg)
         teachers.update({d: (lambda obs, e, _d=d: actor.act(obs[_d])) for d in env.devices})
     mcfg = MAPPOConfig(total_steps=job["steps"], seed=seed, centralized_critic=central,
-                       callback_every=job.get("eval_every", 50_000), **job.get("mappo", {}))
+                       callback_every=job.get("eval_every", 50_000), **{**job.get("mappo", {}), **overrides})
     curve, best, t0 = [], {"return": -np.inf, "steps": 0, "state": None}, time.time()
 
     def on_eval(steps, actors):
@@ -127,12 +130,13 @@ def _run_jobs(jobs: Sequence[dict], workers: int) -> None:
 
 
 def _learned_policies(out_dir: Path, models_dir: Path, algo: str, seed: int, name: str, costs: CostTable,
-                      cfg: SimConfig) -> Dict[str, Callable]:
+                      cfg: SimConfig, profiles: Sequence[str]) -> Dict[str, Callable]:
     from .agents.mappo import load_actor, policies_from_actors
     path, _ = fleet_paths(out_dir, models_dir, algo, seed, name)
     info = json.loads(path.read_text(encoding="utf-8"))
-    if info["cost_table"]["fingerprint"] != costs.fingerprint or SimConfig(**info["job"]["sim"]) != cfg:
-        raise ValueError(f"{path} was trained on another cost table or scenario")
+    if (info["cost_table"]["fingerprint"] != costs.fingerprint or SimConfig(**info["job"]["sim"]) != cfg
+            or list(info["job"].get("profiles", PROFILES)) != list(profiles)):
+        raise ValueError(f"{path} was trained on another cost table, scenario or set of devices")
     _, paths = fleet_paths(out_dir, models_dir, algo, seed, name, info["agents"])
     pol = policies_from_actors({a: load_actor(p) for a, p in paths.items()})
     return pol if "edge" in pol else {**pol, "edge": fleet_edge_rule}
@@ -154,13 +158,13 @@ def _single_device_ppo(out_dir: Path, models_dir: Path, seed: int, costs: CostTa
     return lambda obs, env: actor.act(obs["device"])
 
 
-def best_static_fleet(costs: CostTable, cfg: SimConfig, n_episodes: int = 10):
+def best_static_fleet(costs: CostTable, cfg: SimConfig, n_episodes: int = 10, profiles: Sequence[str] = PROFILES):
     """Best configuration applied by every device (edge rule), searched on validation episodes."""
-    env = FleetEnv(costs, cfg)
+    env = FleetEnv(costs, cfg, profiles)
     scores = {}
     for a in range(env.action_spaces["device0"].n):
         pol = {**on_every_device(static_policy(a), env), "edge": fleet_edge_rule}
-        scores[a] = float(evaluate_fleet(pol, costs, cfg, n_episodes, VAL_SEED0)["return"].mean())
+        scores[a] = float(evaluate_fleet(pol, costs, cfg, n_episodes, VAL_SEED0, profiles)["return"].mean())
     a = max(scores, key=scores.get)
     tier, rate_idx, place = env.decode_device(a)
     name = f"best static {costs.tiers[tier]['name']} {RATES[rate_idx]}fps {'edge' if place else 'local'}"
@@ -171,14 +175,14 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
                     models_dir: Path = Path("models"), workers: int = 1, train: bool = True, n_episodes: int = 20,
                     eval_every: int = 50_000, cost_table: Optional[str] = None, budget_fraction: float = 0.7,
                     name: str = "fleet", mappo: Optional[dict] = None, transfer: bool = True, val_episodes: int = 10,
-                    evaluate: bool = True, log: Callable = print) -> str:
+                    evaluate: bool = True, profiles: Sequence[str] = PROFILES, log: Callable = print) -> str:
     out_dir, models_dir = Path(out_dir), Path(models_dir)
     costs = CostTable.load(cost_table)
     cfg = scenario_configs(costs, budget_fraction)[SCENARIO]
     if train:
         jobs = [{"name": name, "algo": a, "seed": k, "steps": steps, "eval_every": eval_every,
                  "mappo": dict(DEFAULT_MAPPO if mappo is None else mappo), "cost_table": cost_table, "sim": asdict(cfg),
-                 "profiles": list(PROFILES), "val_episodes": val_episodes, "out_dir": str(out_dir),
+                 "profiles": list(profiles), "val_episodes": val_episodes, "out_dir": str(out_dir),
                  "models_dir": str(models_dir)}
                 for a in algos for k in seeds]
         log(f"[fleet] {len(jobs)} training runs on {workers} worker(s)")
@@ -186,10 +190,10 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
     if not evaluate:
         return ""
 
-    env = FleetEnv(costs, cfg)
-    static_name, static_pol, static_scores = best_static_fleet(costs, cfg, val_episodes)
-    test = lambda pol: evaluate_fleet(pol, costs, cfg, n_episodes, TEST_SEED0)
-    val = lambda pol: float(evaluate_fleet(pol, costs, cfg, val_episodes, VAL_SEED0)["return"].mean())
+    env, n = FleetEnv(costs, cfg, profiles), len(profiles)
+    static_name, static_pol, static_scores = best_static_fleet(costs, cfg, val_episodes, profiles)
+    test = lambda pol: evaluate_fleet(pol, costs, cfg, n_episodes, TEST_SEED0, profiles)
+    val = lambda pol: float(evaluate_fleet(pol, costs, cfg, val_episodes, VAL_SEED0, profiles)["return"].mean())
     every = lambda p: on_every_device(p, env)
     candidates = {
         "rule_based (edge rule)": {**every(BASELINES["rule_based"]), "edge": fleet_edge_rule},
@@ -211,7 +215,7 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
                 refs["single-device PPO"] = float(np.mean([val(p) for p in pols]))
     seed_rows, curves = [], {}
     for a in algos:
-        per_seed = [test(_learned_policies(out_dir, models_dir, a, k, name, costs, cfg)) for k in seeds]
+        per_seed = [test(_learned_policies(out_dir, models_dir, a, k, name, costs, cfg, profiles)) for k in seeds]
         results[LABELS[a]] = _concat(per_seed)
         infos = [json.loads(fleet_paths(out_dir, models_dir, a, k, name)[0].read_text(encoding="utf-8")) for k in seeds]
         seed_rows.append(f"| {LABELS[a]} | " + " | ".join(f"{float(r['return'].mean()):.1f} (checkpoint "
@@ -220,7 +224,7 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
         ret = np.array([[p["return"] for p in i["curve"][:n_pts]] for i in infos])
         curves[a] = {"steps": [p["steps"] for p in infos[0]["curve"][:n_pts]], "mean": ret.mean(0).tolist(),
                      "std": ret.std(0).tolist(), "n_seeds": len(infos)}
-    header = (f"### Three devices ({', '.join(PROFILES)} links) sharing one edge, battery {cfg.battery_mj / 1000:g} J "
+    header = (f"### {n} devices ({', '.join(profiles)} links) sharing one edge, battery {cfg.battery_mj / 1000:g} J "
               f"per device per {cfg.horizon} s episode\n\nMean ± std over {n_episodes} test episodes (seeds {TEST_SEED0}+; "
               f"learned methods: pooled over {len(seeds)} training seeds). Δ return: paired difference vs `{static_name}`, "
               f"95 % CI.")
@@ -228,15 +232,15 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
     figure = ""
     try:
         from .plots import learning_curves
-        panels = {"devices from scratch": {a: c for a, c in curves.items() if not ALGOS[a][2]},
-                  "devices from the single-device actors": {a.replace("_warm", ""): c for a, c in curves.items()
-                                                            if ALGOS[a][2]}}
-        panels = {p: c for p, c in panels.items() if c}
+        panels: Dict[str, dict] = {}                 # one panel per recipe, one series per base algorithm
+        for a, c in curves.items():
+            base, recipe = ALGOS[a]
+            panels.setdefault(RECIPES[recipe][0], {})[base] = c
         for theme, suffix in (("light", ""), ("dark", "_dark")):
-            learning_curves(panels, {p: refs for p in panels}, LABELS, out_dir / f"{name}_learning_curves{suffix}.png",
-                            theme, colors=COLORS)
+            learning_curves(panels, {p: refs for p in panels}, BASE_LABELS,
+                            out_dir / f"{name}_learning_curves{suffix}.png", theme, colors=COLORS)
         figure = (f'<picture><source media="(prefers-color-scheme: dark)" srcset="{name}_learning_curves_dark.png">'
-                  f'<img alt="Validation return vs training steps, three devices sharing one edge" '
+                  f'<img alt="Validation return vs training steps, {n} devices sharing one edge" '
                   f'src="{name}_learning_curves.png"></picture>\n\n')
     except ImportError:
         log("[fleet] matplotlib not installed: figure skipped")
@@ -245,7 +249,7 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
                 + "\n".join(seed_rows))
     report = (f"## {name}\n\nCost table: `{costs.source}` ({costs.fingerprint}) · {len(seeds)} seeds × {steps:,} steps "
               f"per run\n\n{figure}{header}\n\n{summarize(results, static_name)}\n\nDevices still running at the end of "
-              f"the episode (of 3):\n\n| policy | alive |\n|---|---|\n{alive}\n\nTest return per training seed (step of "
+              f"the episode (of {n}):\n\n| policy | alive |\n|---|---|\n{alive}\n\nTest return per training seed (step of "
               f"the selected checkpoint):\n\n{per_seed}\n")
     (out_dir / f"{name}.md").write_text(report, encoding="utf-8")
     return report

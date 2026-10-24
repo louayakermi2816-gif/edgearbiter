@@ -2,6 +2,7 @@
 
     python scripts/run_fleet.py --steps 1000000 --seeds 0 1 2 --workers 4
     python scripts/run_fleet.py --skip-training          # re-evaluate saved actors, redraw the figure
+    python scripts/run_fleet.py --profiles near mid far near mid --name fleet5   # five devices
 
 Needs the measured cost table and the single-device study (its PPO actors are the transfer baseline):
 scripts/run_experiments.py --budget-fraction 0.7. Writes results/fleet.md, results/fleet_energy_constrained.{md,csv,json}
@@ -14,6 +15,8 @@ import os
 import sys
 
 from edgearbiter.fleet_study import ALGOS, run_fleet_study
+from edgearbiter.sim.fleet import PROFILES
+from edgearbiter.sim.link import LINK_PROFILES
 
 
 def main():
@@ -31,13 +34,16 @@ def main():
     ap.add_argument("--budget-fraction", type=float, default=0.7)
     ap.add_argument("--cost-table", default=None)
     ap.add_argument("--name", default="fleet")
+    ap.add_argument("--profiles", nargs="+", default=list(PROFILES), choices=list(LINK_PROFILES),
+                    help="one link profile per device, e.g. near mid far near mid for five devices")
     ap.add_argument("--out", default="results")
     ap.add_argument("--models", default="models")
     args = ap.parse_args()
     print(run_fleet_study(args.algos, args.seeds, args.steps, out_dir=args.out, models_dir=args.models,
                           workers=args.workers, train=not args.skip_training, n_episodes=args.episodes,
                           eval_every=args.eval_every, cost_table=args.cost_table, budget_fraction=args.budget_fraction,
-                          name=args.name, transfer=not args.no_transfer, evaluate=not args.train_only))
+                          name=args.name, transfer=not args.no_transfer, evaluate=not args.train_only,
+                          profiles=args.profiles))
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
 
     curves[scenario][algo] = {"steps", "mean", "std", "n_seeds"}; references[scenario][name] = return.
     `colors` fixes each algo's series colour across panels (default: its position in the panel); the
-    legend is the first panel's."""
+    legend lists every series once."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -71,7 +71,11 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
         ax.set_xlabel("environment steps (millions)", color=t["ink2"], fontsize=9)
         ax.set_ylabel("validation return (mean over seeds)", color=t["ink2"], fontsize=9)
         ax.set_xlim(0, x_max * 1.02 if x_max else 1)
-    handles, names = axes[0][0].get_legend_handles_labels()
+    handles, names = [], []                         # every series once, in order of appearance
+    for ax in axes[0]:
+        for h, n in zip(*ax.get_legend_handles_labels()):
+            if n not in names:
+                handles.append(h); names.append(n)
     if handles:
         leg = fig.legend(handles, names, loc="lower center", ncol=len(handles), frameon=False, fontsize=9,
                          bbox_to_anchor=(0.5, -0.01))

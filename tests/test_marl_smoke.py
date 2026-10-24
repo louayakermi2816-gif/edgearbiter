@@ -75,3 +75,13 @@ def test_behaviour_cloning_warm_start_imitates_the_edge_rule():
     actors, _, _ = train_mappo(EdgeArbiterEnv(CostTable.synthetic(), SMALL), MAPPOConfig(**TINY, bc_steps=1000), log=None,
                                init_policies={"edge": edge_rule})
     assert set(actors) == {"device", "edge"}
+
+
+def test_critic_warmup_keeps_the_actors_still():
+    env = EdgeArbiterEnv(CostTable.synthetic(), SMALL)
+    torch.manual_seed(0)
+    reference = {a: Actor(env.observation_spaces[a].shape[0], env.action_spaces[a].n).state_dict() for a in ("device", "edge")}
+    actors, critics, _ = train_mappo(env, MAPPOConfig(**TINY, critic_warmup_steps=160), log=None)
+    assert all(torch.equal(actors[a].state_dict()[k], reference[a][k]) for a in actors for k in reference[a])
+    moved, _, _ = train_mappo(env, MAPPOConfig(**TINY), log=None)
+    assert not torch.equal(moved["device"].state_dict()["net.0.weight"], reference["device"]["net.0.weight"])

@@ -134,6 +134,8 @@ class MAPPOConfig:
     centralized_critic: bool = True     # True = MAPPO, False = IPPO
     bc_steps: int = 20_000              # environment steps of teacher data for `init_policies` warm starts
     bc_smoothing: float = 0.2           # label smoothing of the warm start (lower = closer to the teacher)
+    critic_warmup_steps: int = 0        # env steps of critic-only updates first (actors frozen): after a warm
+                                        # start, the critics learn the warm-started policy's values before it moves
     callback_every: int = 0             # env steps between `callback(steps, actors)` calls (0 = never)
 
 
@@ -295,6 +297,7 @@ def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str]
         t_act = {a: torch.as_tensor(buf_act[a].reshape(-1)) for a in controlled}
         t_logp = {a: torch.as_tensor(buf_logp[a].reshape(-1)) for a in controlled}
         B = T * N
+        actors_frozen = steps <= cfg.critic_warmup_steps
         for _ in range(cfg.epochs):
             perm = torch.randperm(B)
             for s in range(0, B, cfg.minibatch):
@@ -303,7 +306,7 @@ def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str]
                     loss_v = (critic(t_cin[k][mb]) - ret_n[k][mb]).pow(2).mean()
                     c_opt[k].zero_grad(); loss_v.backward()
                     nn.utils.clip_grad_norm_(critic.parameters(), cfg.max_grad_norm); c_opt[k].step()
-                for a in controlled:
+                for a in ([] if actors_frozen else controlled):
                     d = actors[a].dist(t_obs[a][mb])
                     ratio = torch.exp(d.log_prob(t_act[a][mb]) - t_logp[a][mb])
                     adv_mb = adv[value_of[a]][mb]
