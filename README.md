@@ -21,7 +21,8 @@ only** (no hardware):
 3. **Cooperative agents** — a *device* agent (model tier × sensing rate ×
    local/offload) and an *edge* agent (admit × CPU share), trained with
    **independent PPO (IPPO)** and **MAPPO** (centralised critic, decentralised
-   execution), against static, rule-based and model-based baselines.
+   execution), against static, rule-based and model-based baselines — on one device,
+   and on three devices sharing one edge.
 4. **The IoT loop** — a **FastAPI** policy service, **MQTT** and a **Node-RED**
    board, fed by a **virtual ESP32 node** (Python, same protocol as the firmware);
    the Arduino firmware itself runs in the **Wokwi** ESP32 simulator.
@@ -50,6 +51,7 @@ In development since September 2026. Every number below comes from a file in
 | Simulator, baselines, IPPO / MAPPO, experiment protocol | done, tested (`pytest`, CI) |
 | RL study on the measured table (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
 | RL study on the synthetic development table | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
+| Multi-device study: 3 devices sharing one edge (IPPO / MAPPO, learned edge, transfer) | done — [results/fleet.md](results/fleet.md) |
 | Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI |
 | Fine-tuning from ImageNet weights; top-1 of the pretrained zoo | code ready; needs download.pytorch.org, not reachable from the build environment |
 | ESP32 firmware in Wokwi; Docker stack | files ready; not run here (no Docker; the Arduino / PlatformIO download hosts are blocked) |
@@ -391,9 +393,80 @@ What the numbers say on that table:
   (−2.8 ± 2.4); IPPO's learned edge rejects far fewer offloads (4.9 vs 15.6 per episode)
   but the return is the same. In this simulator the threshold rule is already a good
   admission policy; settings where the edge holds more private information (several
-  devices, unannounced load bursts) are where joint learning should matter — next step.
+  devices, unannounced load bursts) are where joint learning should matter — see
+  [Several devices, one edge](#several-devices-one-edge).
 - **Pairing matters.** Episode returns vary by about ± 200 with the workload; paired
   differences have CIs of ± 2–10, which is what makes 20 test episodes × 3 seeds conclusive.
+
+### Several devices, one edge
+
+With one device, the edge has little to decide: the threshold rule is already a good
+admission policy, and joint training does not beat the single agent on either table.
+`edgearbiter/sim/fleet.py` extends the simulator to the setting where the edge knows what no
+device knows — **three devices sharing one edge**:
+
+- the devices sit near, at mid-distance and far from the access point (their link is good
+  81 %, 42 % and 13 % of the time); each keeps the single-device agent's actions and
+  observation, and has its own workload, queue and battery (22.8 J per episode, the measured
+  `energy_constrained` budget);
+- the edge sits behind their access point: the k devices that offload in the same interval
+  split its airtime and the CPU share reserved for them, so each sees k times the transfer and
+  the service time. The devices cannot see each other; only the edge sees every request, and it
+  **admits or rejects each device separately** (8 admission masks × 2 CPU shares);
+- team reward: the devices' rewards summed, minus the edge congestion cost; a device whose
+  battery runs out drops out for the rest of the episode.
+
+The study (`scripts/run_fleet.py`) is a 2 × 2 design — the devices learn with the edge on its
+threshold rule, or together with a learned edge (warm-started from the rule); independent
+critics (IPPO) or one centralised critic (MAPPO) — against the best configuration applied by
+every device, the device heuristics with the threshold rule or a link-aware edge rule (admit
+only the devices that report a good link), and the **single-device PPO actors deployed on
+every device** (trained alone with the edge, on the same table and budget). Same protocol as
+above: 3 seeds × 1 M steps, model selection on validation episodes, 20 test episodes, paired
+95 % CIs ([results/fleet.md](results/fleet.md)).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="results/fleet_learning_curves_dark.png"><img alt="Validation return vs environment steps for the four fleet configurations from scratch and the two started from the single-device actors" src="results/fleet_learning_curves.png"></picture>
+
+Validation return during training (mean over 3 seeds, band ± std); right panel: the devices start
+from the single-device PPO actors. Test results (20 episodes; Δ against the best configuration
+applied by every device, paired 95 % CI):
+
+| policy | test return | Δ vs best static (95 % CI) | accuracy | deadline misses | energy (3 devices) | offloaded | rejected | devices alive at the end |
+|---|---|---|---|---|---|---|---|---|
+| rule_based (edge rule) | 2752.5 | -372.8 ± 106.3 | 0.843 | 2.0 % | 67.6 J | 1352 | 4 | 0.30 / 3 |
+| deadline_greedy (edge rule) | 3193.9 | +68.6 ± 100.8 | 0.869 | 14.3 % | 62.3 J | 2253 | 9 | 2.20 / 3 |
+| deadline_greedy (link-aware edge) | 3157.4 | +32.1 ± 73.4 | 0.868 | 2.5 % | 65.0 J | 1399 | 21 | 1.60 / 3 |
+| best static | 3125.3 | — | 0.869 | 0.0 % | 68.4 J | 0 | 0 | 0.20 / 3 |
+| single-device PPO on each device (edge rule) | 3451.7 | +326.4 ± 56.5 | 0.867 | 9.4 % | 64.7 J | 2034 | 5 | 1.22 / 3 |
+| single-device PPO on each device (link-aware edge) | 3420.1 | +294.9 ± 43.3 | 0.867 | 2.0 % | 66.4 J | 1337 | 13 | 0.75 / 3 |
+| IPPO, devices (edge rule) | 3410.8 | +285.5 ± 55.3 | 0.866 | 3.3 % | 65.9 J | 1524 | 15 | 0.83 / 3 |
+| MAPPO, devices (edge rule) | 3408.5 | +283.2 ± 50.0 | 0.866 | 2.7 % | 66.1 J | 1428 | 9 | 0.78 / 3 |
+| IPPO, devices + edge | 3400.2 | +274.9 ± 57.1 | 0.865 | 3.0 % | 66.1 J | 1485 | 22 | 0.80 / 3 |
+| MAPPO, devices + edge | 3397.6 | +272.4 ± 48.3 | 0.865 | 3.1 % | 66.1 J | 1490 | 9 | 0.87 / 3 |
+| IPPO, devices + edge, from single-device actors | 3423.9 | +298.7 ± 56.3 | 0.867 | 9.1 % | 64.9 J | 1966 | 8 | 1.08 / 3 |
+| MAPPO, devices + edge, from single-device actors | 3419.2 | +293.9 ± 57.3 | 0.866 | 6.3 % | 65.2 J | 1768 | 9 | 0.98 / 3 |
+
+What the numbers say:
+
+- **Every learned configuration beats the heuristics and the best common configuration**
+  (+272 to +326 per episode), but **the best policy is the simplest one**: the single-device PPO
+  actors, trained alone, copied onto every device with the threshold edge rule (+326.4 ± 56.5).
+- **Joint training from scratch ends below it** (−41 to −54 per episode, paired CIs ± 23–27)
+  after 1 M steps, with the curves still rising slowly — a larger budget may narrow the gap.
+  The jointly trained devices are more cautious: they offload about a quarter fewer frames and
+  keep deadline misses at ~3 % instead of 9 %, but spend more energy and run out of battery
+  earlier (0.8 vs 1.2 devices still running at the end).
+- **Starting from the single-device actors does not help either.** With fresh critics and the
+  exploration bonus, joint training first moves away from the transferred behaviour and then
+  re-learns it; the selected checkpoints come from the first 50–150 k steps and still end
+  28 ± 11 (IPPO) and 33 ± 18 (MAPPO) below the transfer. MAPPO's dip is about half of IPPO's — the
+  one place where the centralised critic visibly helps; elsewhere MAPPO and IPPO are level.
+- **The learned edge does not beat the threshold rule** (−11 ± 17 with IPPO, −11 ± 23 with MAPPO),
+  and the link-aware rule does not help the single-device actors (−32 ± 27). Our reading: here,
+  avoiding contention costs about as much energy as it saves in deadline misses, so coordination
+  has little to gain, while a reward summed over three devices makes each device's learning
+  signal noisier. A sharper test needs a scarcer shared resource — more devices or worse links
+  (`FleetEnv(profiles=...)`).
 
 ## The IoT loop in software
 
@@ -448,6 +521,7 @@ python scripts/run_benchmark.py --tiers deployment --merge results/benchmark_dev
 python scripts/run_experiments.py --budget-fraction 0.7 --steps 1000000 --seeds 0 1 2 --workers 4
 python scripts/run_experiments.py --cost-table synthetic --name experiments_synthetic --steps 1000000 --seeds 0 1 2 --workers 4
 python scripts/inspect_policy.py --scenario energy_constrained --algo mappo --seed 0
+python scripts/run_fleet.py --steps 1000000 --seeds 0 1 2 --workers 4      # three devices, one edge (~1 h)
 ```
 
 ## Layout
@@ -463,10 +537,12 @@ edgearbiter/costs.py          cost table (measured, or the labelled synthetic de
 edgearbiter/sim/link.py       link (incl. uplink throughput), workload, edge load, congestion
 edgearbiter/sim/env.py        two-agent simulator, latency tail, observation builders, edge rule
 edgearbiter/sim/gym_env.py    Gymnasium wrapper of the device agent (DeviceEnv)
+edgearbiter/sim/fleet.py      several devices sharing one edge (FleetEnv), edge rules for the fleet
 edgearbiter/agents/mappo.py   IPPO / MAPPO trainer (value norm, vectorised envs, warm start)
 edgearbiter/baselines.py      static, rule-based and deadline-greedy policies
 edgearbiter/evaluate.py       seeded evaluation, paired comparisons, tables
 edgearbiter/experiments.py    scenarios, multi-seed training, model selection, report
+edgearbiter/fleet_study.py    multi-device study: training, baselines, transfer, report
 edgearbiter/plots.py          learning curves (light / dark)
 edgearbiter/api.py            FastAPI: /policy/decide, /infer, /sim/*
 edgearbiter/virtual_node.py   virtual ESP32 node: MQTT telemetry -> decision -> simulated interval
@@ -474,8 +550,8 @@ edgearbiter/broker.py         MQTT broker in Python (amqtt), for running the loo
 firmware/esp32/edge_node/     ESP32 telemetry + decision node (Arduino) and its Wokwi project
 node-red/flows.json           control loop (telemetry -> /policy/decide -> decision) and the board
 scripts/                      finetune_imagenette, run_benchmark, run_baselines, run_experiments,
-                              train_single_agent, train_marl, inspect_policy
-tests/                        simulator, agents, benchmark, training loop, experiments, API, MQTT loop
+                              run_fleet, train_single_agent, train_marl, inspect_policy
+tests/                        simulator, fleet, agents, benchmark, training loop, experiments, API, MQTT loop
 ```
 
 ## Limitations (known, on purpose)
