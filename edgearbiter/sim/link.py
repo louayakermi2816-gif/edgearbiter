@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -11,6 +12,16 @@ LINK_PARAMS = {"good": ((8.0, 20.0), (20.0, 50.0)), "fair": ((25.0, 60.0), (5.0,
 # Markov transition matrix over LINK_STATES (rows sum to 1)
 LINK_TRANSITIONS = np.array([[0.90, 0.08, 0.02], [0.10, 0.80, 0.10], [0.03, 0.17, 0.80]])
 _LINK_CDF = LINK_TRANSITIONS.cumsum(axis=1) / LINK_TRANSITIONS.sum(axis=1, keepdims=True)
+# radio conditions of devices at different distances from the access point (multi-device study)
+LINK_PROFILES = {
+    "near": np.array([[0.95, 0.04, 0.01], [0.25, 0.70, 0.05], [0.10, 0.30, 0.60]]),
+    "mid": LINK_TRANSITIONS,
+    "far": np.array([[0.80, 0.15, 0.05], [0.05, 0.75, 0.20], [0.02, 0.10, 0.88]]),
+}
+
+
+def link_cdf(transitions: np.ndarray) -> np.ndarray:
+    return transitions.cumsum(axis=1) / transitions.sum(axis=1, keepdims=True)
 
 
 def classify_link(rtt_ms: float, bandwidth_mbps: float) -> int:
@@ -27,10 +38,12 @@ class Link:
     state: int = 0
     rtt_ms: float = 12.0
     bandwidth_mbps: float = 30.0
+    cdf: Optional[np.ndarray] = None        # cumulative transition matrix (default: LINK_TRANSITIONS)
 
     def step(self, rng: np.random.Generator) -> None:
         # same draw as rng.choice(3, p=LINK_TRANSITIONS[state]) without its per-call validation
-        self.state = int(_LINK_CDF[self.state].searchsorted(rng.random(), side="right"))
+        cdf = _LINK_CDF if self.cdf is None else self.cdf
+        self.state = int(cdf[self.state].searchsorted(rng.random(), side="right"))
         (rlo, rhi), (blo, bhi) = LINK_PARAMS[LINK_STATES[self.state]]
         self.rtt_ms = float(rng.uniform(rlo, rhi))
         self.bandwidth_mbps = float(rng.uniform(blo, bhi))
