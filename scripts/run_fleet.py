@@ -18,11 +18,14 @@ from edgearbiter.fleet_study import ALGOS, run_fleet_study
 from edgearbiter.sim.fleet import PROFILES
 from edgearbiter.sim.link import LINK_PROFILES
 
+# the configurations of the three-device study (results/fleet.md); ALGOS has every base x recipe combination
+STUDY = ["ippo_devices", "mappo_devices", "ippo", "mappo", "ippo_warm", "mappo_warm", "mappo_ft"]
+
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--algos", nargs="*", default=list(ALGOS), choices=list(ALGOS))
+    ap.add_argument("--algos", nargs="*", default=STUDY, choices=list(ALGOS))
     ap.add_argument("--steps", type=int, default=1_000_000)
     ap.add_argument("--seeds", type=int, nargs="*", default=[0, 1, 2])
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1)

@@ -211,8 +211,8 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
             label = f"single-device PPO on each device ({edge_name})"
             pols = [{**every(_single_device_ppo(out_dir, models_dir, k, costs, cfg)), "edge": edge} for k in seeds]
             results[label] = _concat([test(p) for p in pols])
-            if edge is fleet_edge_rule:
-                refs["single-device PPO"] = float(np.mean([val(p) for p in pols]))
+            refs["single-device PPO" + ("" if edge is fleet_edge_rule else ", link-aware edge")] = \
+                float(np.mean([val(p) for p in pols]))
     seed_rows, curves = [], {}
     for a in algos:
         per_seed = [test(_learned_policies(out_dir, models_dir, a, k, name, costs, cfg, profiles)) for k in seeds]
