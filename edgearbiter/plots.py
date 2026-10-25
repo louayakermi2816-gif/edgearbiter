@@ -58,15 +58,16 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
         lo_y, hi_y = ax.get_ylim()
         lo_y, hi_y = min([lo_y] + [v for _, v in refs]) - 10, max([hi_y] + [v for _, v in refs]) + 10
         ax.set_ylim(lo_y, hi_y)
-        prev = hi_y                       # the top of the axes counts as the line above the first reference
-        for name, value in refs:          # label above its line, or below it when the line above is too close
-            below = prev - value < 0.06 * (hi_y - lo_y)
+        label_h = 0.065 * (hi_y - lo_y)   # height of a reference label, in data units
+        ceiling = hi_y                    # lowest point taken so far by the axes top, a line or a label
+        for name, value in refs:          # label above its line when it fits under the ceiling, else below it
+            below = ceiling - value < label_h
             ax.axhline(value, color=t["muted"], linewidth=1)
             ax.annotate(f"{name} {value:.0f}", xy=(0, value), xycoords=("axes fraction", "data"),
                         xytext=(6, -3 if below else 3), textcoords="offset points", fontsize=8.5, color=t["ink2"],
                         ha="left", va="top" if below else "bottom", zorder=5,
                         bbox={"boxstyle": "square,pad=0.15", "facecolor": t["surface"], "edgecolor": "none", "alpha": 0.85})
-            prev = value
+            ceiling = value - label_h if below else value
         ax.set_title(scenario.replace("_", " "), color=t["ink"], fontsize=11, loc="left", pad=8)
         ax.set_xlabel("environment steps (millions)", color=t["ink2"], fontsize=9)
         ax.set_ylabel("validation return (mean over seeds)", color=t["ink2"], fontsize=9)
@@ -76,12 +77,14 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
         for h, n in zip(*ax.get_legend_handles_labels()):
             if n not in names:
                 handles.append(h); names.append(n)
+    ncol = min(len(handles), 2 * len(scenarios)) or 1    # about two entries fit under each panel
+    rows = -(-len(handles) // ncol)
     if handles:
-        leg = fig.legend(handles, names, loc="lower center", ncol=len(handles), frameon=False, fontsize=9,
+        leg = fig.legend(handles, names, loc="lower center", ncol=ncol, frameon=False, fontsize=9,
                          bbox_to_anchor=(0.5, -0.01))
         for txt in leg.get_texts():
             txt.set_color(t["ink2"])
-    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.tight_layout(rect=(0, 0.07 * rows, 1, 1))
     out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, facecolor=t["surface"])
     plt.close(fig)

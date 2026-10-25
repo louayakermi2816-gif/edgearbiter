@@ -171,6 +171,16 @@ def best_static_fleet(costs: CostTable, cfg: SimConfig, n_episodes: int = 10, pr
     return name, static_policy(a), scores
 
 
+def redraw_figure(out_dir: Path, name: str = "fleet") -> None:
+    """Draw the learning-curve figure (light and dark) from the data saved by `run_fleet_study`."""
+    from .plots import learning_curves
+    data = json.loads((Path(out_dir) / "runs" / name / "figure.json").read_text(encoding="utf-8"))
+    panels, refs = data["panels"], data["references"]
+    for theme, suffix in (("light", ""), ("dark", "_dark")):
+        learning_curves(panels, {p: refs for p in panels}, BASE_LABELS, Path(out_dir) / f"{name}_learning_curves{suffix}.png",
+                        theme, colors=COLORS)
+
+
 def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_dir: Path = Path("results"),
                     models_dir: Path = Path("models"), workers: int = 1, train: bool = True, n_episodes: int = 20,
                     eval_every: int = 50_000, cost_table: Optional[str] = None, budget_fraction: float = 0.7,
@@ -231,14 +241,13 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
     save_results(results, out_dir, f"{name}_{SCENARIO}", ref=static_name, header=header)
     figure = ""
     try:
-        from .plots import learning_curves
         panels: Dict[str, dict] = {}                 # one panel per recipe, one series per base algorithm
         for a, c in curves.items():
             base, recipe = ALGOS[a]
             panels.setdefault(RECIPES[recipe][0], {})[base] = c
-        for theme, suffix in (("light", ""), ("dark", "_dark")):
-            learning_curves(panels, {p: refs for p in panels}, BASE_LABELS,
-                            out_dir / f"{name}_learning_curves{suffix}.png", theme, colors=COLORS)
+        data = out_dir / "runs" / name / "figure.json"   # what the figure shows, to redraw it without evaluating
+        data.write_text(json.dumps({"panels": panels, "references": refs}, indent=1), encoding="utf-8")
+        redraw_figure(out_dir, name)
         figure = (f'<picture><source media="(prefers-color-scheme: dark)" srcset="{name}_learning_curves_dark.png">'
                   f'<img alt="Validation return vs training steps, {n} devices sharing one edge" '
                   f'src="{name}_learning_curves.png"></picture>\n\n')
