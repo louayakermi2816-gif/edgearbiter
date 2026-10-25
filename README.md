@@ -22,7 +22,7 @@ only** (no hardware):
    local/offload) and an *edge* agent (admit × CPU share), trained with
    **independent PPO (IPPO)** and **MAPPO** (centralised critic, decentralised
    execution), against static, rule-based and model-based baselines — on one device,
-   and on three devices sharing one edge.
+   and on three and five devices sharing one edge.
 4. **The IoT loop** — a **FastAPI** policy service, **MQTT** and a **Node-RED**
    board, fed by a **virtual ESP32 node** (Python, same protocol as the firmware);
    the Arduino firmware itself runs in the **Wokwi** ESP32 simulator.
@@ -51,7 +51,7 @@ In development since September 2026. Every number below comes from a file in
 | Simulator, baselines, IPPO / MAPPO, experiment protocol | done, tested (`pytest`, CI) |
 | RL study on the measured table (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
 | RL study on the synthetic development table | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
-| Multi-device study: 3 devices sharing one edge (IPPO / MAPPO, learned edge, transfer) | done — [results/fleet.md](results/fleet.md) |
+| Multi-device studies: 3 and 5 devices sharing one edge (IPPO / MAPPO, learned edge, transfer, fine-tuning) | done — [3 devices](results/fleet.md), [5 devices](results/fleet5.md) |
 | Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI |
 | Fine-tuning from ImageNet weights; top-1 of the pretrained zoo | code ready; needs download.pytorch.org, not reachable from the build environment |
 | ESP32 firmware in Wokwi; Docker stack | files ready; not run here (no Docker; the Arduino / PlatformIO download hosts are blocked) |
@@ -421,15 +421,16 @@ threshold rule, or together with a learned edge (warm-started from the rule); in
 critics (IPPO) or one centralised critic (MAPPO) — against the best configuration applied by
 every device, the device heuristics with the threshold rule or a link-aware edge rule (admit
 only the devices that report a good link), and the **single-device PPO actors deployed on
-every device** (trained alone with the edge, on the same table and budget). Same protocol as
-above: 3 seeds × 1 M steps, model selection on validation episodes, 20 test episodes, paired
-95 % CIs ([results/fleet.md](results/fleet.md)).
+every device** (trained alone with the edge, on the same table and budget). Three more
+configurations start the devices from those actors: IPPO and MAPPO with a learned edge, and MAPPO
+with critic warm-up. Same protocol as above: 3 seeds × 1 M steps, model selection on validation
+episodes, 20 test episodes, paired 95 % CIs ([results/fleet.md](results/fleet.md)).
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="results/fleet_learning_curves_dark.png"><img alt="Validation return vs environment steps for the four fleet configurations from scratch and the two started from the single-device actors" src="results/fleet_learning_curves.png"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="results/fleet_learning_curves_dark.png"><img alt="Validation return vs environment steps for three devices sharing one edge: four configurations from scratch, three started from the single-device actors" src="results/fleet_learning_curves.png"></picture>
 
-Validation return during training (mean over 3 seeds, band ± std); right panel: the devices start
-from the single-device PPO actors. Test results (20 episodes; Δ against the best configuration
-applied by every device, paired 95 % CI):
+Validation return during training (mean over 3 seeds, band ± std); middle and right panels: the
+devices start from the single-device PPO actors (right: critic-only updates first). Test results
+(20 episodes; Δ against the best configuration applied by every device, paired 95 % CI):
 
 | policy | test return | Δ vs best static (95 % CI) | accuracy | deadline misses | energy (3 devices) | offloaded | rejected | devices alive at the end |
 |---|---|---|---|---|---|---|---|---|
@@ -445,6 +446,7 @@ applied by every device, paired 95 % CI):
 | MAPPO, devices + edge | 3397.6 | +272.4 ± 48.3 | 0.865 | 3.1 % | 66.1 J | 1490 | 9 | 0.87 / 3 |
 | IPPO, devices + edge, from single-device actors | 3423.9 | +298.7 ± 56.3 | 0.867 | 9.1 % | 64.9 J | 1966 | 8 | 1.08 / 3 |
 | MAPPO, devices + edge, from single-device actors | 3419.2 | +293.9 ± 57.3 | 0.866 | 6.3 % | 65.2 J | 1768 | 9 | 0.98 / 3 |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 3444.7 | +319.4 ± 53.7 | 0.867 | 5.9 % | 65.4 J | 1784 | 8 | 0.98 / 3 |
 
 What the numbers say:
 
@@ -461,12 +463,53 @@ What the numbers say:
   re-learns it; the selected checkpoints come from the first 50–150 k steps and still end
   28 ± 11 (IPPO) and 33 ± 18 (MAPPO) below the transfer. MAPPO's dip is about half of IPPO's — the
   one place where the centralised critic visibly helps; elsewhere MAPPO and IPPO are level.
+  Letting the critics learn first (100 k steps of critic-only updates, `MAPPOConfig.critic_warmup_steps`)
+  delays the drop rather than preventing it — it starts when the actors move — but model selection
+  then sees the transferred policy itself: that recipe ties the transfer (−7.0 ± 15.6).
 - **The learned edge does not beat the threshold rule** (−11 ± 17 with IPPO, −11 ± 23 with MAPPO),
   and the link-aware rule does not help the single-device actors (−32 ± 27). Our reading: here,
   avoiding contention costs about as much energy as it saves in deadline misses, so coordination
   has little to gain, while a reward summed over three devices makes each device's learning
-  signal noisier. A sharper test needs a scarcer shared resource — more devices or worse links
-  (`FleetEnv(profiles=...)`).
+  signal noisier. A sharper test needs a scarcer shared resource: five devices, below.
+
+#### Five devices
+
+The same study with five devices (near, mid, far, near, mid:
+`scripts/run_fleet.py --profiles near mid far near mid --name fleet5`). More devices compete for the
+access point, so the edge's admission decisions matter more: with the threshold rule, the
+single-device actors now miss 15 % of their deadlines. Configurations: MAPPO with the edge on its
+rule, IPPO and MAPPO with a learned edge, and MAPPO started from the single-device actors with
+critic warm-up ([results/fleet5.md](results/fleet5.md)).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="results/fleet5_learning_curves_dark.png"><img alt="Validation return vs environment steps for five devices sharing one edge" src="results/fleet5_learning_curves.png"></picture>
+
+| policy | test return | Δ vs best static (95 % CI) | accuracy | deadline misses | energy (5 devices) | offloaded | rejected | devices alive at the end |
+|---|---|---|---|---|---|---|---|---|
+| rule_based (edge rule) | 4904.3 | -304.4 ± 237.8 | 0.846 | 5.6 % | 113.3 J | 3005 | 9 | 0.55 / 5 |
+| deadline_greedy (edge rule) | 5298.5 | +89.8 ± 175.0 | 0.869 | 24.0 % | 103.2 J | 4578 | 16 | 4.00 / 5 |
+| deadline_greedy (link-aware edge) | 5504.0 | +295.3 ± 161.6 | 0.868 | 6.1 % | 108.6 J | 3112 | 40 | 3.15 / 5 |
+| best static | 5208.7 | — | 0.869 | 0.0 % | 114.0 J | 0 | 0 | 0.20 / 5 |
+| single-device PPO on each device (edge rule) | 5818.2 | +609.5 ± 78.5 | 0.867 | 14.9 % | 107.9 J | 4087 | 9 | 2.43 / 5 |
+| single-device PPO on each device (link-aware edge) | 5944.5 | +735.9 ± 84.3 | 0.867 | 4.1 % | 111.4 J | 2951 | 23 | 1.48 / 5 |
+| MAPPO, devices (edge rule) | 5845.2 | +636.5 ± 95.0 | 0.866 | 4.2 % | 111.3 J | 2830 | 19 | 1.48 / 5 |
+| IPPO, devices + edge | 5524.2 | +315.6 ± 84.6 | 0.863 | 4.1 % | 111.8 J | 2058 | 57 | 1.15 / 5 |
+| MAPPO, devices + edge | 5801.4 | +592.7 ± 85.2 | 0.865 | 3.3 % | 110.9 J | 3027 | 22 | 1.45 / 5 |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 5867.2 | +658.6 ± 77.2 | 0.866 | 6.1 % | 110.0 J | 3326 | 4 | 1.88 / 5 |
+
+- **Contention now matters, and a hand-written edge handles it best.** Admitting only the
+  devices that report a good link adds +126 ± 29 to the single-device actors — the best policy
+  found (+736 ± 84 over the best common configuration).
+- **The centralised critic matters with more agents.** With a learned edge, MAPPO beats IPPO by
+  +277 ± 63 (they were level with three devices). Our reading: with independent critics, each of
+  the six agents estimates its value from its own observation of a reward summed over five devices.
+- **Joint training reaches the transfer, and fine-tuning goes a little past it.** MAPPO trained from
+  scratch with the threshold rule ties the single-device actors under that rule (+27 ± 39), and
+  MAPPO started from them, with critic warm-up, gains +49 ± 40 — the first configuration where
+  joint training improves on the transfer. Both were still improving at 1 M steps.
+- **The learned edge is the weak link.** Warm-started from the threshold rule, it ends below that
+  rule (−44 ± 33 with MAPPO) and does not discover link-aware admission, so the transferred actors
+  with the hand-written link-aware edge stay ahead (by 77 ± 36 over the fine-tuned MAPPO). Next
+  steps: start the edge from the link-aware rule, train longer, more seeds.
 
 ## The IoT loop in software
 
@@ -522,6 +565,8 @@ python scripts/run_experiments.py --budget-fraction 0.7 --steps 1000000 --seeds 
 python scripts/run_experiments.py --cost-table synthetic --name experiments_synthetic --steps 1000000 --seeds 0 1 2 --workers 4
 python scripts/inspect_policy.py --scenario energy_constrained --algo mappo --seed 0
 python scripts/run_fleet.py --steps 1000000 --seeds 0 1 2 --workers 4      # three devices, one edge (~1 h)
+python scripts/run_fleet.py --profiles near mid far near mid --name fleet5 \
+    --algos mappo_devices ippo mappo mappo_ft --seeds 0 1 2 --workers 4      # five devices (~1.5 h)
 ```
 
 ## Layout

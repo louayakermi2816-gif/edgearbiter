@@ -58,9 +58,9 @@ def learning_curves(curves: Dict[str, Dict[str, Optional[dict]]], references: Di
         lo_y, hi_y = ax.get_ylim()
         lo_y, hi_y = min([lo_y] + [v for _, v in refs]) - 10, max([hi_y] + [v for _, v in refs]) + 10
         ax.set_ylim(lo_y, hi_y)
-        prev = None
+        prev = hi_y                       # the top of the axes counts as the line above the first reference
         for name, value in refs:          # label above its line, or below it when the line above is too close
-            below = prev is not None and prev - value < 0.06 * (hi_y - lo_y)
+            below = prev - value < 0.06 * (hi_y - lo_y)
             ax.axhline(value, color=t["muted"], linewidth=1)
             ax.annotate(f"{name} {value:.0f}", xy=(0, value), xycoords=("axes fraction", "data"),
                         xytext=(6, -3 if below else 3), textcoords="offset points", fontsize=8.5, color=t["ink2"],
