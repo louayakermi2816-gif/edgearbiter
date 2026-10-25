@@ -2,9 +2,9 @@
 
 Cost table: `results/cost_table.json` (2a623037e244) · 3 seeds × 1,000,000 steps per run
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="fleet_learning_curves_dark.png"><img alt="Validation return vs training steps, three devices sharing one edge" src="fleet_learning_curves.png"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="fleet_learning_curves_dark.png"><img alt="Validation return vs training steps, 3 devices sharing one edge" src="fleet_learning_curves.png"></picture>
 
-### Three devices (near, mid, far links) sharing one edge, battery 22.8 J per device per 300 s episode
+### 3 devices (near, mid, far links) sharing one edge, battery 22.8 J per device per 300 s episode
 
 Mean ± std over 20 test episodes (seeds 1000+; learned methods: pooled over 3 training seeds). Δ return: paired difference vs `best static medium 10fps local`, 95 % CI.
 
@@ -22,6 +22,7 @@ Mean ± std over 20 test episodes (seeds 1000+; learned methods: pooled over 3 t
 | MAPPO, devices + edge | 3397.6 ± 204.0 | 0.865 ± 0.003 | 0.031 ± 0.017 | 66.1 ± 2.7 | 21.8 ± 12.9 | 1490.0 ± 481.8 | 8.8 ± 9.1 | 131.4 ± 77.6 | +272.4 ± 48.3 |
 | IPPO, devices + edge, from single-device actors | 3423.9 ± 235.1 | 0.867 ± 0.001 | 0.091 ± 0.041 | 64.9 ± 3.8 | 29.7 ± 39.8 | 1966.2 ± 802.3 | 8.0 ± 8.3 | 89.7 ± 33.9 | +298.7 ± 56.3 |
 | MAPPO, devices + edge, from single-device actors | 3419.2 ± 239.6 | 0.866 ± 0.002 | 0.063 ± 0.031 | 65.2 ± 3.8 | 22.4 ± 36.9 | 1768.1 ± 720.5 | 9.3 ± 8.7 | 93.7 ± 42.7 | +293.9 ± 57.3 |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 3444.7 ± 225.3 | 0.867 ± 0.001 | 0.059 ± 0.040 | 65.4 ± 3.4 | 18.8 ± 22.8 | 1784.2 ± 718.9 | 8.1 ± 9.5 | 99.7 ± 44.1 | +319.4 ± 53.7 |
 
 Devices still running at the end of the episode (of 3):
 
@@ -39,6 +40,7 @@ Devices still running at the end of the episode (of 3):
 | MAPPO, devices + edge | 0.87 |
 | IPPO, devices + edge, from single-device actors | 1.08 |
 | MAPPO, devices + edge, from single-device actors | 0.98 |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 0.98 |
 
 Test return per training seed (step of the selected checkpoint):
 
@@ -50,3 +52,4 @@ Test return per training seed (step of the selected checkpoint):
 | MAPPO, devices + edge | 3353.7 (checkpoint 851k) | 3390.7 (checkpoint 801k) | 3448.5 (checkpoint 801k) |
 | IPPO, devices + edge, from single-device actors | 3433.2 (checkpoint 100k) | 3434.6 (checkpoint 151k) | 3404.0 (checkpoint 50k) |
 | MAPPO, devices + edge, from single-device actors | 3444.0 (checkpoint 50k) | 3459.8 (checkpoint 50k) | 3353.8 (checkpoint 151k) |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 3424.6 (checkpoint 600k) | 3457.8 (checkpoint 851k) | 3451.6 (checkpoint 50k) |

@@ -1,4 +1,4 @@
-### Three devices (near, mid, far links) sharing one edge, battery 22.8 J per device per 300 s episode
+### 3 devices (near, mid, far links) sharing one edge, battery 22.8 J per device per 300 s episode
 
 Mean ± std over 20 test episodes (seeds 1000+; learned methods: pooled over 3 training seeds). Δ return: paired difference vs `best static medium 10fps local`, 95 % CI.
 
@@ -16,3 +16,4 @@ Mean ± std over 20 test episodes (seeds 1000+; learned methods: pooled over 3 t
 | MAPPO, devices + edge | 3397.6 ± 204.0 | 0.865 ± 0.003 | 0.031 ± 0.017 | 66.1 ± 2.7 | 21.8 ± 12.9 | 1490.0 ± 481.8 | 8.8 ± 9.1 | 131.4 ± 77.6 | +272.4 ± 48.3 |
 | IPPO, devices + edge, from single-device actors | 3423.9 ± 235.1 | 0.867 ± 0.001 | 0.091 ± 0.041 | 64.9 ± 3.8 | 29.7 ± 39.8 | 1966.2 ± 802.3 | 8.0 ± 8.3 | 89.7 ± 33.9 | +298.7 ± 56.3 |
 | MAPPO, devices + edge, from single-device actors | 3419.2 ± 239.6 | 0.866 ± 0.002 | 0.063 ± 0.031 | 65.2 ± 3.8 | 22.4 ± 36.9 | 1768.1 ± 720.5 | 9.3 ± 8.7 | 93.7 ± 42.7 | +293.9 ± 57.3 |
+| MAPPO, devices + edge, from single-device actors, critic warm-up | 3444.7 ± 225.3 | 0.867 ± 0.001 | 0.059 ± 0.040 | 65.4 ± 3.4 | 18.8 ± 22.8 | 1784.2 ± 718.9 | 8.1 ± 9.5 | 99.7 ± 44.1 | +319.4 ± 53.7 |
