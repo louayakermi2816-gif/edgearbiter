@@ -31,7 +31,7 @@ from edgearbiter.benchmark import (TIER_SETS, benchmark_models, build_cost_table
                                    markdown_table)
 
 DEFAULT_MODELS = ["mobilenet_v3_small", "mobilenet_v3_large", "mobilenet_v3_large_int8", "resnet18", "resnet18_int8",
-                  "efficientnet_b0", "ssdlite320_mobilenet_v3_large"]
+                  "efficientnet_b0", "ssdlite320_mobilenet_v3_large", "ssdlite320_mobilenet_v3_large_int8"]
 
 
 def load_run(path: str):

@@ -14,9 +14,10 @@ For each model we measure:
 Models
     torchvision zoo    MobileNetV3-Small/Large, ResNet-18, EfficientNet-B0, SSDLite; INT8 variants
                        shipped by torchvision (eager mode, on the engine their weights were calibrated
-                       for: qnnpack for MobileNetV3, fbgemm for ResNet-18). `pretrained` downloads the
-                       ImageNet weights; `random` builds the same architectures without download
-                       (latency / size / memory are valid, accuracy is not).
+                       for: qnnpack for MobileNetV3, fbgemm for ResNet-18), and SSDLite with its backbone
+                       and heads quantised after training (FX graph mode, `quantize.QuantizedSSD`).
+                       `pretrained` downloads the ImageNet / COCO weights; `random` builds the same
+                       architectures without download (latency / size / memory are valid, accuracy is not).
     Imagenette models  <arch>_imagenette[_scratch] trained by `edgearbiter.finetune`, and their
                        `_int8` variants: post-training static quantisation (FX graph mode, x86
                        engine) calibrated on Imagenette training images (`edgearbiter.quantize`).
@@ -59,7 +60,7 @@ ENERGY_MJ_PER_MS = 0.45     # crude device energy model: mJ per ms of CPU infere
 class ModelSpec:
     build: Callable[[bool], torch.nn.Module]   # build(pretrained) -> model (FP32 for `ptq` models)
     img: int = 224                             # input resolution for latency and accuracy
-    detector: bool = False                     # detectors are benchmarked for latency only
+    detector: bool = False                     # detectors: latency and memory only (no COCO evaluation)
     backend: Optional[str] = None              # quantisation engine of an INT8 model
     imagenet_head: bool = True                 # False: native 10-class Imagenette head (no class mapping)
     ptq: bool = False                          # INT8 by post-training quantisation of `build(...)`'s model
@@ -94,6 +95,9 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
 
     qmnv3, qr18 = tvq.MobileNet_V3_Large_QuantizedWeights, tvq.ResNet18_QuantizedWeights
     ssd = tvm.detection.SSDLite320_MobileNet_V3_Large_Weights
+
+    def ssdlite(pretrained: bool) -> torch.nn.Module:
+        return tvm.detection.ssdlite320_mobilenet_v3_large(weights=_weights(ssd, pretrained), weights_backbone=None)
     zoo = {
         "mobilenet_v3_small": ModelSpec(lambda p: tvm.mobilenet_v3_small(weights=_weights(tvm.MobileNet_V3_Small_Weights, p))),
         "mobilenet_v3_large": ModelSpec(lambda p: tvm.mobilenet_v3_large(weights=_weights(tvm.MobileNet_V3_Large_Weights, p))),
@@ -104,9 +108,9 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
                                              backend=qmnv3.DEFAULT.meta["backend"]),
         "resnet18_int8": ModelSpec(lambda p: tvq.resnet18(weights=_weights(qr18, p), quantize=True),
                                    backend=qr18.DEFAULT.meta["backend"]),
-        # detector (latency only unless a COCO evaluation is wired in)
-        "ssdlite320_mobilenet_v3_large": ModelSpec(lambda p: tvm.detection.ssdlite320_mobilenet_v3_large(
-            weights=_weights(ssd, p), weights_backbone=None), img=320, detector=True),
+        # detector (latency only unless a COCO evaluation is wired in), FP32 and post-training INT8
+        "ssdlite320_mobilenet_v3_large": ModelSpec(ssdlite, img=320, detector=True),
+        "ssdlite320_mobilenet_v3_large_int8": ModelSpec(ssdlite, img=320, detector=True, ptq=True, backend="x86"),
     }
     # models trained on Imagenette by scripts/finetune_imagenette.py, FP32 and post-training INT8
     for arch in ARCHS:
@@ -274,7 +278,8 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                 rows.append({"model": name, "role": role, "int8": spec.backend is not None, "quant_engine": m["quant_engine"],
                              "quantisation": ("PTQ (FX)" if spec.ptq else "torchvision") if spec.backend else None,
                              "weights": "random" if not pretrained else label, "img": spec.img, "threads": m["threads"],
-                             "cpu_quota": cpu_quota, "latency_ms": m["latency_ms"], "size_mb": size,
+                             "cpu_quota": cpu_quota, "latency_ms": m["latency_ms"],
+                             "latency_net_ms": m.get("latency_net_ms"), "size_mb": size,
                              "memory_mb": m["model_mem_mb"], "inference_mem_mb": m["inference_mem_mb"],
                              "rss_peak_mb": m["rss_peak_mb"], "accuracy": acc,
                              "accuracy_metric": ("imagenette_10way_top1" if acc is not None else None)})
@@ -304,6 +309,12 @@ def markdown_table(rows: List[Dict], host: Optional[Dict] = None) -> str:
         mem = "—" if r.get("memory_mb") is None else f"{r['memory_mb']:.1f}"
         lines.append(f"| {r['model']} | {q} | {r['img']}px | {r['threads']} | {r['latency_ms']['p50']:.1f} | "
                      f"{r['latency_ms']['p95']:.1f} | {mem} | {r['size_mb']} | {acc} |")
+    nets = [r for r in rows if r.get("latency_net_ms")]
+    if nets:
+        lines += ["", "Detectors, backbone + heads only (the part that runs in INT8; no box decoding or NMS):", "",
+                  "| model | precision | threads | p50 ms | p95 ms |", "|---|---|---|---|---|"]
+        lines += [f"| {r['model']} | {'INT8' if r['int8'] else 'FP32'} | {r['threads']} | {r['latency_net_ms']['p50']:.1f} | "
+                  f"{r['latency_net_ms']['p95']:.1f} |" for r in nets]
     return "\n".join(lines) + "\n"
 
 

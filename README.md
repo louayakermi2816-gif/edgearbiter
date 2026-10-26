@@ -13,7 +13,7 @@ only** (no hardware):
    evaluation), quantised to INT8 (`torch.ao.quantization`), and benchmarked for
    top-1 accuracy, p50/p95 latency and memory on an **emulated low-power device**
    (one CPU-throttled core) and on an edge server, together with torchvision's
-   FP32/INT8 zoo and the SSDLite detector. The measurements form the **cost table**
+   FP32/INT8 zoo and the SSDLite detector (FP32 and INT8). The measurements form the **cost table**
    that drives the simulator.
 2. **An IoT–edge simulator**: bursty workload, Markov wireless link with a
    bandwidth-limited uplink, bounded device queue, energy budget, edge server
@@ -47,14 +47,14 @@ In development since September 2026. Every number below comes from a file in
 | Part | State |
 |---|---|
 | Imagenette training pipeline | done: MobileNetV3-Small 82.6 %, MobileNetV3-Large 83.9 %, ResNet-18 86.7 % top-1, trained from scratch on CPU |
-| Benchmark: FP32 / INT8, top-1, p50 / p95, memory; emulated device and edge | done — [device](results/benchmark_device_imagenette.md), [edge](results/benchmark_edge_imagenette.md), torchvision zoo incl. SSDLite ([device](results/benchmark_device_zoo.md), [edge](results/benchmark_edge_zoo.md)) |
+| Benchmark: FP32 / INT8, top-1, p50 / p95, memory; emulated device and edge | done — [device](results/benchmark_device_imagenette.md), [edge](results/benchmark_edge_imagenette.md), torchvision zoo incl. SSDLite in FP32 and INT8 ([device](results/benchmark_device_zoo.md), [edge](results/benchmark_edge_zoo.md)) |
 | Measured cost table → simulator | done — [results/cost_table.json](results/cost_table.json) (the default table) |
 | Simulator, baselines, IPPO / MAPPO, experiment protocol | done, tested (`pytest`, CI) |
 | RL study on the measured table (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
 | RL study on the synthetic development table | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
 | Multi-device studies: 3 and 5 devices sharing one edge (IPPO / MAPPO, learned edge, transfer, fine-tuning) | done — [3 devices](results/fleet.md), [5 devices](results/fleet5.md) |
 | Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI |
-| Fine-tuning from ImageNet weights; top-1 of the pretrained zoo | code ready; needs download.pytorch.org, not reachable from the build environment |
+| Fine-tuning from ImageNet weights; top-1 of the pretrained zoo; detector accuracy (COCO mAP) | fine-tuning code ready; needs download.pytorch.org (weights) and images.cocodataset.org, not reachable from the build environment |
 | ESP32 firmware in Wokwi; Docker stack | files ready; not run here (no Docker; the Arduino / PlatformIO download hosts are blocked) |
 
 ## Quick start
@@ -138,24 +138,53 @@ Measured 2026-10-23 on an Intel Xeon @ 2.80 GHz VM (4 vCPU), torch 2.14.1, 128 p
 
 The same measurements for torchvision's architectures at their native resolution, with
 random weights (latency and memory do not depend on the weights; accuracy is not
-measured): torchvision's own INT8 models are quantised in eager mode for qnnpack
-(MobileNetV3-Large) and fbgemm (ResNet-18).
+measured). torchvision's own INT8 classifiers are quantised in eager mode for qnnpack
+(MobileNetV3-Large) and fbgemm (ResNet-18). The SSDLite detector is quantised like the
+Imagenette models (post-training, FX graph mode, x86 engine, calibrated on 512 Imagenette
+images): its backbone and heads run in INT8, while resizing, anchors, box decoding and
+non-maximum suppression stay the FP32 model's own (`edgearbiter.quantize.QuantizedSSD`).
+
+Measured on 2026-10-26, when the host ran 1.8–2.8× faster than for the Imagenette tables
+above: re-timed on the emulated device that day, MobileNetV3-Small takes 19.9 ms (55.4 ms
+above), ResNet-18 79.7 ms (146.0) and ResNet-18 INT8 14.4 ms (40.3), still the fastest of
+the three. Compare models within one table, not across the two
+([device](results/benchmark_device_zoo.md), [edge](results/benchmark_edge_zoo.md)).
 
 | model | precision | input | device p50 / p95 | edge p50, 1 thread | edge p50, 4 threads | memory | weights |
 |---|---|---|---|---|---|---|---|
-| mobilenet_v3_small | FP32 | 224 px | 93.1 / 121.1 ms | 13.4 ms | 14.5 ms | 19.8 MB | 10.3 MB |
-| mobilenet_v3_large | FP32 | 224 px | 222.9 / 265.0 ms | 37.1 ms | 32.2 ms | 45.3 MB | 22.1 MB |
-| mobilenet_v3_large_int8 | INT8 (qnnpack) | 224 px | 199.8 / 255.5 ms | 38.1 ms | 40.2 ms | 19.1 MB | 5.7 MB |
-| resnet18 | FP32 | 224 px | 360.4 / 420.5 ms | 72.9 ms | 30.4 ms | 65.8 MB | 46.8 MB |
-| resnet18_int8 | INT8 (fbgemm) | 224 px | 120.4 / 160.6 ms | 21.0 ms | 9.6 ms | 18.2 MB | 11.8 MB |
-| efficientnet_b0 | FP32 | 224 px | 320.0 / 365.0 ms | 59.1 ms | 36.9 ms | 43.3 MB | 21.4 MB |
-| ssdlite320_mobilenet_v3_large | FP32 | 320 px | 702.8 / 856.1 ms | 124.8 ms | 110.0 ms | 55.9 MB | 14.1 MB |
+| mobilenet_v3_small | FP32 | 224 px | 37.0 / 40.3 ms | 6.1 ms | 6.2 ms | 19.6 MB | 10.3 MB |
+| mobilenet_v3_large | FP32 | 224 px | 81.4 / 102.6 ms | 15.9 ms | 13.5 ms | 45.2 MB | 22.1 MB |
+| mobilenet_v3_large_int8 | INT8 (qnnpack) | 224 px | 119.7 / 132.3 ms | 25.6 ms | 22.4 ms | 19.5 MB | 5.7 MB |
+| resnet18 | FP32 | 224 px | 187.6 / 225.3 ms | 42.3 ms | 13.3 ms | 65.8 MB | 46.8 MB |
+| resnet18_int8 | INT8 (fbgemm) | 224 px | 57.4 / 63.2 ms | 11.3 ms | 4.8 ms | 17.9 MB | 11.8 MB |
+| efficientnet_b0 | FP32 | 224 px | 125.3 / 140.4 ms | 25.9 ms | 20.8 ms | 43.1 MB | 21.4 MB |
+| ssdlite320_mobilenet_v3_large | FP32 | 320 px | 338.9 / 401.1 ms | 69.2 ms | 59.1 ms | 54.6 MB | 14.1 MB |
+| ssdlite320_mobilenet_v3_large_int8 | INT8 (x86, PTQ) | 320 px | 237.9 / 318.3 ms | 49.3 ms | 46.4 ms | 28.9 MB | 4.1 MB |
 
-At 224 px the larger compute of ResNet-18 shows again: MobileNetV3-Small is the fastest
-classifier on the device, and INT8 ResNet-18 is 3× faster than FP32 ResNet-18 but slower
-than MobileNetV3-Small. torchvision's INT8
-MobileNetV3-Large, calibrated for ARM (qnnpack), gains little on this x86 host. The SSDLite detector needs 0.7 s per frame on the device and 0.11 s on
-the edge: an offload candidate, not a 10 fps device workload.
+The detector in two parts, from the same runs: backbone + heads (what INT8 changes) and the
+whole detector (with box decoding and NMS):
+
+| detector part | precision | device p50 / p95 | edge p50, 1 thread | edge p50, 4 threads |
+|---|---|---|---|---|
+| ssdlite320_mobilenet_v3_large: backbone + heads | FP32 | 182.5 / 201.5 ms | 34.5 ms | 26.7 ms |
+| ssdlite320_mobilenet_v3_large: whole detector | FP32 | 338.9 / 401.1 ms | 69.2 ms | 59.1 ms |
+| ssdlite320_mobilenet_v3_large_int8: backbone + heads | INT8 (x86, PTQ) | 75.1 / 85.1 ms | 13.7 ms | 9.0 ms |
+| ssdlite320_mobilenet_v3_large_int8: whole detector | INT8 (x86, PTQ) | 237.9 / 318.3 ms | 49.3 ms | 46.4 ms |
+
+- **INT8 makes SSDLite's backbone and heads 2.4× faster on the device** (182.5 → 75.1 ms)
+  and 3.0× on the edge at 4 threads (26.7 → 9.0 ms), with 3.4× smaller weights and about
+  half the memory (54.6 → 28.9 MB).
+- **The whole detector gains less** (1.4× on the device, 338.9 → 237.9 ms): box decoding
+  and NMS stay in FP32, and with random weights they get the most work they can — every
+  class scores about 1/91 at each of the 3,234 anchors, so all 90 classes reach the cap of
+  300 candidates and 27,000 boxes go through NMS. A trained detector concentrates its scores
+  on fewer boxes, so these end-to-end times are an upper bound on the post-processing.
+- Even in INT8 the detector needs about 0.24 s per frame on the device and 46 ms on the
+  edge: an offload candidate, not a 10 fps device workload.
+- Among the classifiers, torchvision's INT8 MobileNetV3-Large, calibrated for ARM
+  (qnnpack), is slower than its FP32 parent on this x86 host, while INT8 ResNet-18 is 3.3×
+  faster than FP32 ResNet-18; at 224 px MobileNetV3-Small stays the fastest classifier on the
+  device.
 
 ### From measurements to the cost table
 
@@ -574,6 +603,9 @@ M=$(for a in mobilenet_v3_small mobilenet_v3_large resnet18; do echo -n "${a}_im
 python scripts/run_benchmark.py --role device --threads 1 --cpu-quota 0.25 --iters 200 --models $M --tag imagenette
 python scripts/run_benchmark.py --role edge --threads 1 2 4 --iters 200 --models $M --tag imagenette
 python scripts/run_benchmark.py --tiers deployment --merge results/benchmark_device_imagenette.json results/benchmark_edge_imagenette.json
+# torchvision zoo incl. SSDLite FP32 / INT8, random weights (the INT8 detector calibrates on Imagenette)
+python scripts/run_benchmark.py --role device --weights random --threads 1 --cpu-quota 0.25 --tag zoo
+python scripts/run_benchmark.py --role edge --weights random --threads 1 4 --tag zoo
 # 3. agents: measured table (default) and synthetic development table (~1 h each on 4 cores)
 python scripts/run_experiments.py --budget-fraction 0.7 --steps 1000000 --seeds 0 1 2 --workers 4
 python scripts/run_experiments.py --cost-table synthetic --name experiments_synthetic --steps 1000000 --seeds 0 1 2 --workers 4
@@ -588,7 +620,7 @@ python scripts/run_fleet.py --profiles near mid far near mid --name fleet5 \
 ```
 edgearbiter/data.py           Imagenette loaders, augmentation, shared preprocessing
 edgearbiter/finetune.py       training on Imagenette (MobileNetV3-Small/Large, ResNet-18; ImageNet init or scratch)
-edgearbiter/quantize.py       post-training static INT8 quantisation (FX), restore of saved INT8 models
+edgearbiter/quantize.py       post-training static INT8 quantisation (FX): classifiers, SSDLite backbone + heads; restore
 edgearbiter/benchmark.py      accuracy / latency / memory benchmark, model zoo, deployment tiers, cost-table builder
 edgearbiter/bench_worker.py   one model measured in a fresh process (latency, p95, memory)
 edgearbiter/cpulimit.py       emulated device: CPU-bandwidth-limited cgroup
@@ -621,8 +653,12 @@ tests/                        simulator, fleet, agents, benchmark, training loop
 - **Energy** per inference is derived from latency (0.45 mJ per ms of inference), not
   measured with a power meter.
 - The models are trained **from scratch** (the ImageNet weights could not be downloaded);
-  fine-tuned models would be more accurate. The detector is benchmarked for latency and
-  memory only, with random weights.
+  fine-tuned models would be more accurate. The detector (FP32 and INT8) is benchmarked for
+  latency and memory only, with random weights: its accuracy (COCO mAP) needs the COCO weights
+  and validation images.
+- Absolute latencies depend on the host's day: the zoo, measured three days after the
+  Imagenette models, ran 1.8–2.8× faster on the same VM type. Rankings held; compare within a
+  table.
 - Memory counts the model, not the Python/PyTorch runtime around it (about 0.7 GB here),
   which a deployment runtime would replace.
 - Post-training quantisation uses `torch.ao.quantization`, deprecated upstream in favour

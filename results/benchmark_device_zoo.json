@@ -1,13 +1,13 @@
 {
  "host": {
   "label": "emulated device (1 thread, 0.25 CPU)",
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
   "logical_cpus": 4,
   "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
   "python": "3.13.17",
   "torch": "2.14.1+cu130",
   "torchvision": "0.29.1+cu130",
-  "date_utc": "2026-10-23T20:36:02Z"
+  "date_utc": "2026-10-26T23:37:50Z"
  },
  "rows": [
   {
@@ -21,14 +21,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 93.11031849938445,
-    "p95": 121.11780715185887,
-    "mean": 94.60745824006153
+    "p50": 37.04594100008762,
+    "p95": 40.30223109982671,
+    "mean": 33.28857611996682
    },
+   "latency_net_ms": null,
    "size_mb": 10.3,
-   "memory_mb": 19.8,
-   "inference_mem_mb": 9.5,
-   "rss_peak_mb": 736.7,
+   "memory_mb": 19.6,
+   "inference_mem_mb": 9.3,
+   "rss_peak_mb": 734.6,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -43,14 +44,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 222.89518050092738,
-    "p95": 265.0005692521517,
-    "mean": 226.958268160015
+    "p50": 81.3603604999571,
+    "p95": 102.55011600020224,
+    "mean": 85.49116343998321
    },
+   "latency_net_ms": null,
    "size_mb": 22.13,
-   "memory_mb": 45.3,
-   "inference_mem_mb": 23.1,
-   "rss_peak_mb": 762.1,
+   "memory_mb": 45.2,
+   "inference_mem_mb": 23.0,
+   "rss_peak_mb": 760.3,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -65,14 +67,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 199.83898700229474,
-    "p95": 255.49475169991635,
-    "mean": 205.1542424100262
+    "p50": 119.72859050024454,
+    "p95": 132.34736240005986,
+    "mean": 119.03042994006682
    },
+   "latency_net_ms": null,
    "size_mb": 5.65,
-   "memory_mb": 19.1,
-   "inference_mem_mb": 13.5,
-   "rss_peak_mb": 740.8,
+   "memory_mb": 19.5,
+   "inference_mem_mb": 13.9,
+   "rss_peak_mb": 739.3,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -87,14 +90,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 360.3634544997476,
-    "p95": 420.50163485055236,
-    "mean": 366.9195575302001
+    "p50": 187.6254560002053,
+    "p95": 225.34286944994614,
+    "mean": 193.325373220041
    },
+   "latency_net_ms": null,
    "size_mb": 46.84,
    "memory_mb": 65.8,
    "inference_mem_mb": 19.0,
-   "rss_peak_mb": 782.8,
+   "rss_peak_mb": 780.9,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -109,14 +113,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 120.37254650022078,
-    "p95": 160.57945570209995,
-    "mean": 125.78838666009688
+    "p50": 57.35472650007978,
+    "p95": 63.17320899988772,
+    "mean": 55.0080894599796
    },
+   "latency_net_ms": null,
    "size_mb": 11.84,
-   "memory_mb": 18.2,
-   "inference_mem_mb": 6.4,
-   "rss_peak_mb": 740.8,
+   "memory_mb": 17.9,
+   "inference_mem_mb": 6.0,
+   "rss_peak_mb": 738.3,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -131,14 +136,15 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 319.9751185002242,
-    "p95": 365.0482840012046,
-    "mean": 322.2163463002289
+    "p50": 125.2857255001345,
+    "p95": 140.4372684999089,
+    "mean": 127.98292519997631
    },
+   "latency_net_ms": null,
    "size_mb": 21.45,
-   "memory_mb": 43.3,
-   "inference_mem_mb": 21.9,
-   "rss_peak_mb": 760.6,
+   "memory_mb": 43.1,
+   "inference_mem_mb": 21.7,
+   "rss_peak_mb": 758.5,
    "accuracy": null,
    "accuracy_metric": null
   },
@@ -153,14 +159,46 @@
    "threads": 1,
    "cpu_quota": 0.25,
    "latency_ms": {
-    "p50": 702.8492369991,
-    "p95": 856.0872023490447,
-    "mean": 718.1415971998285
+    "p50": 338.94377600017833,
+    "p95": 401.14322364995587,
+    "mean": 351.2145701600366
+   },
+   "latency_net_ms": {
+    "p50": 182.51551349999318,
+    "p95": 201.46595149994937,
+    "mean": 183.70035827999345
    },
    "size_mb": 14.06,
-   "memory_mb": 55.9,
-   "inference_mem_mb": 41.8,
-   "rss_peak_mb": 781.5,
+   "memory_mb": 54.6,
+   "inference_mem_mb": 40.6,
+   "rss_peak_mb": 778.0,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large_int8",
+   "role": "device",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "random",
+   "img": 320,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 237.91270299989264,
+    "p95": 318.2803982999076,
+    "mean": 244.80029041998023
+   },
+   "latency_net_ms": {
+    "p50": 75.08675350004523,
+    "p95": 85.06379584978276,
+    "mean": 73.58659533997525
+   },
+   "size_mb": 4.09,
+   "memory_mb": 28.9,
+   "inference_mem_mb": 24.8,
+   "rss_peak_mb": 795.5,
    "accuracy": null,
    "accuracy_metric": null
   }

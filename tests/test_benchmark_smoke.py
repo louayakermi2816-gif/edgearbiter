@@ -64,6 +64,32 @@ def test_post_training_int8_keeps_predictions_and_restores_from_state():
     assert torch.equal(fresh(x), q(x))
 
 
+def test_post_training_int8_detector_keeps_the_detection_interface_and_restores_from_state():
+    import io
+    import torchvision.models as tvm
+    from edgearbiter.quantize import QuantizedSSD, detector_trunk, quantize_ptq
+
+    def ssdlite():
+        return tvm.detection.ssdlite320_mobilenet_v3_large(weights=None, weights_backbone=None).eval()
+    torch.manual_seed(0)
+    fp32 = ssdlite()
+    q = quantize_ptq(fp32, [(torch.randn(2, 3, 320, 320), None)], batches=1, img=320, fast=True)
+    images = [torch.rand(3, 320, 320), torch.rand(3, 240, 400)]
+    with torch.no_grad():
+        out = q(images)
+    assert isinstance(q, QuantizedSSD) and len(out) == 2 and set(out[1]) == {"boxes", "scores", "labels"}
+    assert out[1]["boxes"][:, 2].max() <= 400 and out[1]["boxes"][:, 3].max() <= 240    # original image coordinates
+    assert state_dict_size_mb(q) < state_dict_size_mb(fp32) / 3
+    trunk, x = detector_trunk(q, 320)
+    assert trunk is q.trunk and x.shape == (1, 3, 320, 320)
+    buf = io.BytesIO(); torch.save(q.state_dict(), buf); buf.seek(0)
+    fresh = quantize_ptq(ssdlite(), [(torch.rand(1, 3, 320, 320), None)], batches=1, img=320, fast=True)
+    fresh.load_state_dict(torch.load(buf, weights_only=False))
+    with torch.no_grad():
+        a, b = fresh(images[:1])[0], q(images[:1])[0]
+    assert all(torch.equal(a[k], b[k]) for k in a)
+
+
 def test_cpu_limit_slows_the_measurement_down():
     from edgearbiter.cpulimit import CpuLimit
     try:

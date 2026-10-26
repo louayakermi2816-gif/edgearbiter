@@ -118,9 +118,13 @@ def run(job: dict) -> dict:
         join(job["cgroup_procs"])
     lat = measure_latency(model, example_input(spec), iters=int(job.get("iters", 50)), warmup=int(job.get("warmup", 10)))
     peak = mem.peak()
+    net = None
+    if spec.detector:                                            # backbone + heads only: no box decoding or NMS
+        from .quantize import detector_trunk
+        net = measure_latency(*detector_trunk(model, spec.img), iters=int(job.get("iters", 50)), warmup=int(job.get("warmup", 10)))
     from .benchmark import state_dict_size_mb
     weights = state_dict_size_mb(model)
-    return {"latency_ms": lat, "rss_baseline_mb": round(baseline, 1), "rss_loaded_mb": round(loaded, 1),
+    return {"latency_ms": lat, "latency_net_ms": net, "rss_baseline_mb": round(baseline, 1), "rss_loaded_mb": round(loaded, 1),
             "rss_peak_mb": round(peak, 1), "weights_mb": round(weights, 2), "inference_mem_mb": round(peak - loaded, 1),
             "model_mem_mb": round(weights + peak - loaded, 1), "threads": torch.get_num_threads(),
             "quant_engine": torch.backends.quantized.engine if (spec.backend or job.get("int8_state")) else None}
