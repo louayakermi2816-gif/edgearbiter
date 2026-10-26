@@ -478,10 +478,14 @@ The same study with five devices (near, mid, far, near, mid:
 `scripts/run_fleet.py --profiles near mid far near mid --name fleet5`). More devices compete for the
 access point, so the edge's admission decisions matter more: with the threshold rule, the
 single-device actors now miss 15 % of their deadlines. Configurations: MAPPO with the edge on its
-rule, IPPO and MAPPO with a learned edge, and MAPPO started from the single-device actors with
-critic warm-up ([results/fleet5.md](results/fleet5.md)).
+rule, IPPO and MAPPO with a learned edge, MAPPO started from the single-device actors with critic
+warm-up, and the same around the link-aware rule — the learned edge starting from it, or the edge
+fixed to it ([results/fleet5.md](results/fleet5.md)).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="results/fleet5_learning_curves_dark.png"><img alt="Validation return vs environment steps for five devices sharing one edge" src="results/fleet5_learning_curves.png"></picture>
+
+Panel titles: how the agents start, and the edge rule (the fixed edge, or the learned edge's
+starting point).
 
 | policy | test return | Δ vs best static (95 % CI) | accuracy | deadline misses | energy (5 devices) | offloaded | rejected | devices alive at the end |
 |---|---|---|---|---|---|---|---|---|
@@ -495,6 +499,8 @@ critic warm-up ([results/fleet5.md](results/fleet5.md)).
 | IPPO, devices + edge | 5524.2 | +315.6 ± 84.6 | 0.863 | 4.1 % | 111.8 J | 2058 | 57 | 1.15 / 5 |
 | MAPPO, devices + edge | 5801.4 | +592.7 ± 85.2 | 0.865 | 3.3 % | 110.9 J | 3027 | 22 | 1.45 / 5 |
 | MAPPO, devices + edge, from single-device actors, critic warm-up | 5867.2 | +658.6 ± 77.2 | 0.866 | 6.1 % | 110.0 J | 3326 | 4 | 1.88 / 5 |
+| MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up | 5950.1 | +741.4 ± 83.4 | 0.867 | 4.1 % | 111.3 J | 2987 | 23 | 1.52 / 5 |
+| MAPPO, devices (link-aware edge), from single-device actors, critic warm-up | 5952.0 | +743.3 ± 83.8 | 0.867 | 4.1 % | 111.4 J | 2969 | 22 | 1.47 / 5 |
 
 - **Contention now matters, and a hand-written edge handles it best.** Admitting only the
   devices that report a good link adds +126 ± 29 to the single-device actors — the best policy
@@ -508,8 +514,15 @@ critic warm-up ([results/fleet5.md](results/fleet5.md)).
   joint training improves on the transfer. Both were still improving at 1 M steps.
 - **The learned edge is the weak link.** Warm-started from the threshold rule, it ends below that
   rule (−44 ± 33 with MAPPO) and does not discover link-aware admission, so the transferred actors
-  with the hand-written link-aware edge stay ahead (by 77 ± 36 over the fine-tuned MAPPO). Next
-  steps: start the edge from the link-aware rule, train longer, more seeds.
+  with the hand-written link-aware edge stay ahead (by 77 ± 36 over the fine-tuned MAPPO).
+- **Fine-tuning the best hand-made system adds nothing.** Starting the devices from the
+  single-device actors and the edge from the link-aware rule — or keeping the edge on that rule —
+  joint MAPPO training never beat its starting point on validation: in all six runs the selected
+  checkpoint comes from the critic warm-up, before any policy update, so these rows reproduce
+  the transfer with the link-aware edge (+5.5 ± 7.0 and +7.4 ± 3.9 against it; the copies differ
+  only through behaviour cloning). In this simulator and within 1 M steps, the best policy is
+  single-agent PPO on each device with a well-chosen hand-written edge; where MAPPO's centralised
+  critic clearly helps is in learning jointly once five agents share the edge (vs IPPO, above).
 
 ## The IoT loop in software
 

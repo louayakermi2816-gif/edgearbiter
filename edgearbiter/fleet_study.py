@@ -37,14 +37,15 @@ BASES = {   # base algorithm -> (the edge learns, centralised critic); the devic
 BASE_LABELS = {"ippo_devices": "IPPO, devices (edge rule)", "mappo_devices": "MAPPO, devices (edge rule)",
                "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge"}
 COLORS = {"ippo_devices": 0, "mappo_devices": 1, "ippo": 2, "mappo": 3}      # a series' colour follows its base
+FIGURE_LABELS = {"ippo_devices": "IPPO, devices (fixed edge)", "mappo_devices": "MAPPO, devices (fixed edge)",
+                 "ippo": "IPPO, devices + learned edge", "mappo": "MAPPO, devices + learned edge"}
 EDGE_RULES = {"threshold": fleet_edge_rule, "link-aware": link_aware_edge_rule}
 RECIPES = {   # name suffix -> (figure panel, devices from the single-device actors, edge rule: the learned edge's
               #                 warm start or the fixed edge, trainer overrides)
-    "": ("devices from scratch", False, "threshold", {}),
-    "_warm": ("devices from the single-device actors", True, "threshold", {}),
-    "_ft": ("from the single-device actors, critics warmed up first", True, "threshold", {"critic_warmup_steps": 100_000}),
-    "_ftla": ("from the single-device actors and the link-aware edge, critics warmed up first", True, "link-aware",
-              {"critic_warmup_steps": 100_000}),
+    "": ("from scratch · threshold rule", False, "threshold", {}),
+    "_warm": ("single-device actors · threshold rule", True, "threshold", {}),
+    "_ft": ("single-device actors, critic warm-up · threshold rule", True, "threshold", {"critic_warmup_steps": 100_000}),
+    "_ftla": ("single-device actors, critic warm-up · link-aware rule", True, "link-aware", {"critic_warmup_steps": 100_000}),
 }
 RECIPE_LABELS = {"": "", "_warm": ", from single-device actors", "_ft": ", from single-device actors, critic warm-up",
                  "_ftla": ", from single-device actors and the link-aware rule, critic warm-up"}
@@ -189,10 +190,10 @@ def redraw_figure(out_dir: Path, name: str = "fleet") -> None:
     """Draw the learning-curve figure (light and dark) from the data saved by `run_fleet_study`."""
     from .plots import learning_curves
     data = json.loads((Path(out_dir) / "runs" / name / "figure.json").read_text(encoding="utf-8"))
-    panels, refs = data["panels"], data["references"]
+    panels = {RECIPES[r][0]: c for r, c in data["panels"].items()}     # panel title: how the agents start, edge rule
     for theme, suffix in (("light", ""), ("dark", "_dark")):
-        learning_curves(panels, {p: refs for p in panels}, BASE_LABELS, Path(out_dir) / f"{name}_learning_curves{suffix}.png",
-                        theme, colors=COLORS)
+        learning_curves(panels, {p: data["references"] for p in panels}, FIGURE_LABELS,
+                        Path(out_dir) / f"{name}_learning_curves{suffix}.png", theme, colors=COLORS)
 
 
 def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_dir: Path = Path("results"),
@@ -258,7 +259,7 @@ def run_fleet_study(algos: Sequence[str], seeds: Sequence[int], steps: int, out_
         panels: Dict[str, dict] = {}                 # one panel per recipe, one series per base algorithm
         for a, c in curves.items():
             base, recipe = ALGOS[a]
-            panels.setdefault(RECIPES[recipe][0], {})[base] = c
+            panels.setdefault(recipe, {})[base] = c
         data = out_dir / "runs" / name / "figure.json"   # what the figure shows, to redraw it without evaluating
         data.write_text(json.dumps({"panels": panels, "references": refs}, indent=1), encoding="utf-8")
         redraw_figure(out_dir, name)

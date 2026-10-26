@@ -20,6 +20,8 @@ Mean ± std over 20 test episodes (seeds 1000+; learned methods: pooled over 3 t
 | IPPO, devices + edge | 5524.2 ± 335.0 | 0.863 ± 0.004 | 0.041 ± 0.041 | 111.8 ± 3.0 | 44.2 ± 59.5 | 2058.5 ± 1273.6 | 56.9 ± 45.2 | 87.4 ± 47.5 | +315.6 ± 84.6 |
 | MAPPO, devices + edge | 5801.4 ± 340.3 | 0.865 ± 0.002 | 0.033 ± 0.012 | 110.9 ± 2.9 | 36.3 ± 18.3 | 3027.3 ± 608.8 | 22.2 ± 30.9 | 236.8 ± 150.8 | +592.7 ± 85.2 |
 | MAPPO, devices + edge, from single-device actors, critic warm-up | 5867.2 ± 310.2 | 0.866 ± 0.001 | 0.061 ± 0.041 | 110.0 ± 3.5 | 41.4 ± 49.1 | 3325.9 ± 1079.6 | 4.2 ± 6.5 | 176.1 ± 118.4 | +658.6 ± 77.2 |
+| MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up | 5950.1 ± 334.7 | 0.867 ± 0.001 | 0.041 ± 0.014 | 111.3 ± 2.9 | 11.5 ± 11.0 | 2987.2 ± 980.6 | 23.4 ± 8.4 | 102.2 ± 29.0 | +741.4 ± 83.4 |
+| MAPPO, devices (link-aware edge), from single-device actors, critic warm-up | 5952.0 ± 336.2 | 0.867 ± 0.001 | 0.041 ± 0.014 | 111.4 ± 2.9 | 11.0 ± 10.2 | 2968.5 ± 987.8 | 22.4 ± 6.8 | 98.6 ± 27.8 | +743.3 ± 83.8 |
 
 Devices still running at the end of the episode (of 5):
 
@@ -35,6 +37,8 @@ Devices still running at the end of the episode (of 5):
 | IPPO, devices + edge | 1.15 |
 | MAPPO, devices + edge | 1.45 |
 | MAPPO, devices + edge, from single-device actors, critic warm-up | 1.88 |
+| MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up | 1.52 |
+| MAPPO, devices (link-aware edge), from single-device actors, critic warm-up | 1.47 |
 
 Test return per training seed (step of the selected checkpoint):
 
@@ -44,3 +48,5 @@ Test return per training seed (step of the selected checkpoint):
 | IPPO, devices + edge | 5446.8 (checkpoint 950k) | 5405.0 (checkpoint 950k) | 5721.0 (checkpoint 201k) |
 | MAPPO, devices + edge | 5771.7 (checkpoint 851k) | 5846.6 (checkpoint 1000k) | 5785.9 (checkpoint 950k) |
 | MAPPO, devices + edge, from single-device actors, critic warm-up | 5928.9 (checkpoint 700k) | 5785.3 (checkpoint 950k) | 5887.4 (checkpoint 151k) |
+| MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up | 5925.7 (checkpoint 50k) | 5991.1 (checkpoint 100k) | 5933.5 (checkpoint 100k) |
+| MAPPO, devices (link-aware edge), from single-device actors, critic warm-up | 5934.5 (checkpoint 100k) | 5990.0 (checkpoint 50k) | 5931.4 (checkpoint 100k) |

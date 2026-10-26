@@ -439,3 +439,123 @@ single-device PPO on each device (link-aware edge),59,5755.42,0.8666,0.036,107.8
 "MAPPO, devices + edge, from single-device actors, critic warm-up",57,5430.26,0.8661,0.0582,110.15,6730.0,49.0,2180.0,17.0,99.14,0.036
 "MAPPO, devices + edge, from single-device actors, critic warm-up",58,5708.72,0.8677,0.1239,99.5,7281.0,131.0,4533.0,2.0,97.01,0.128
 "MAPPO, devices + edge, from single-device actors, critic warm-up",59,5643.94,0.8669,0.1192,99.53,7172.0,92.0,4410.0,0.0,97.71,0.128
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",0,6293.88,0.8654,0.0292,108.5,7588.0,14.0,3980.0,15.0,80.85,0.05
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",1,5363.44,0.864,0.0611,112.84,6666.0,14.0,1619.0,54.0,121.72,0.012
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",2,5934.33,0.8641,0.0387,111.31,7219.0,6.0,2934.0,34.0,79.28,0.026
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",3,6117.64,0.8647,0.0531,112.11,7523.0,23.0,3451.0,29.0,77.67,0.019
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",4,5348.93,0.8666,0.0402,114.52,6531.0,23.0,817.0,11.0,27.14,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",5,6138.96,0.8656,0.0591,114.32,7619.0,26.0,3424.0,29.0,119.83,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",6,5885.64,0.8645,0.053,109.09,7261.0,0.0,3262.0,31.0,116.84,0.047
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",7,6592.82,0.866,0.0413,114.31,8054.0,7.0,4297.0,11.0,109.19,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",8,6128.92,0.8646,0.0615,107.72,7576.0,18.0,4090.0,23.0,129.21,0.057
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",9,5487.7,0.8652,0.0467,113.81,6734.0,1.0,1551.0,33.0,75.52,0.004
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",10,6166.69,0.8653,0.0445,110.55,7534.0,4.0,3629.0,24.0,126.94,0.031
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",11,5431.34,0.8653,0.0342,113.25,6625.0,0.0,1374.0,38.0,87.54,0.009
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",12,6168.01,0.8655,0.0491,111.93,7569.0,6.0,3540.0,15.0,112.77,0.022
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",13,5814.55,0.8653,0.0626,112.46,7209.0,0.0,2662.0,23.0,154.1,0.014
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",14,6182.6,0.8651,0.0547,111.95,7592.0,26.0,3624.0,32.0,95.23,0.02
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",15,6286.35,0.8656,0.0413,108.19,7647.0,11.0,4164.0,19.0,147.06,0.053
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",16,6244.49,0.865,0.0564,111.05,7667.0,20.0,3878.0,15.0,133.49,0.027
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",17,5456.55,0.8651,0.0468,111.64,6728.0,24.0,1808.0,37.0,112.13,0.024
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",18,5707.78,0.864,0.0612,102.47,7053.0,2.0,3567.0,19.0,108.59,0.102
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",19,5763.06,0.8644,0.0563,105.88,7055.0,2.0,3265.0,35.0,112.55,0.071
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",20,6361.15,0.8688,0.0251,108.52,7616.0,9.0,3993.0,12.0,81.58,0.05
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",21,5489.32,0.8674,0.0704,111.85,6839.0,3.0,2054.0,44.0,153.53,0.022
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",22,6017.89,0.8684,0.035,111.18,7261.0,1.0,2959.0,24.0,80.03,0.026
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",23,6160.42,0.8683,0.0465,111.83,7509.0,19.0,3439.0,25.0,77.54,0.021
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",24,5410.06,0.8685,0.0279,114.31,6537.0,7.0,830.0,11.0,29.55,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",25,6245.44,0.8685,0.0661,114.02,7725.0,14.0,3620.0,21.0,124.98,0.003
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",26,6007.48,0.8685,0.0459,108.82,7313.0,2.0,3340.0,20.0,114.18,0.048
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",27,6592.58,0.8683,0.0392,114.2,8020.0,2.0,4254.0,18.0,106.26,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",28,6160.31,0.8683,0.0663,107.91,7595.0,8.0,4114.0,19.0,125.2,0.055
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",29,5557.88,0.8679,0.0451,113.84,6792.0,0.0,1629.0,30.0,82.0,0.003
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",30,6224.96,0.8683,0.0415,111.08,7562.0,1.0,3635.0,24.0,127.33,0.027
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",31,5469.58,0.8676,0.0332,113.26,6649.0,0.0,1401.0,36.0,89.46,0.01
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",32,6184.03,0.8683,0.0429,111.67,7535.0,0.0,3524.0,24.0,112.41,0.023
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",33,5921.69,0.8684,0.0511,112.4,7264.0,0.0,2791.0,21.0,160.62,0.015
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",34,6227.95,0.8682,0.0477,111.85,7587.0,31.0,3605.0,25.0,95.52,0.021
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",35,6323.02,0.8684,0.0407,107.84,7663.0,9.0,4259.0,23.0,148.62,0.055
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",36,6298.35,0.8684,0.0533,110.62,7687.0,8.0,3980.0,21.0,140.03,0.032
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",37,5585.74,0.8681,0.0452,110.95,6858.0,13.0,2116.0,34.0,132.37,0.029
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",38,5770.08,0.8682,0.0487,102.55,7043.0,2.0,3552.0,25.0,112.78,0.102
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",39,5814.18,0.8683,0.0498,104.81,7056.0,0.0,3312.0,25.0,118.21,0.081
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",40,6243.45,0.8677,0.026,110.77,7495.0,30.0,3623.0,18.0,68.43,0.031
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",41,5578.96,0.8665,0.0265,113.44,6750.0,2.0,1762.0,20.0,118.61,0.006
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",42,5920.42,0.8669,0.0215,113.02,7097.0,0.0,2577.0,17.0,71.32,0.01
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",43,5991.59,0.867,0.0405,113.17,7292.0,28.0,2984.0,26.0,65.03,0.01
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",44,5382.95,0.8675,0.0144,114.41,6465.0,26.0,784.0,6.0,25.55,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",45,6154.59,0.8675,0.0476,114.29,7558.0,37.0,3358.0,16.0,101.54,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",46,5912.52,0.8671,0.0219,110.14,7125.0,4.0,2955.0,18.0,95.78,0.037
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",47,6390.6,0.8674,0.0347,114.25,7764.0,12.0,3819.0,22.0,87.98,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",48,6202.99,0.8672,0.031,110.72,7495.0,18.0,3712.0,23.0,110.8,0.031
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",49,5517.13,0.8667,0.0155,114.38,6647.0,0.0,1391.0,17.0,62.98,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",50,6192.25,0.8674,0.0302,113.12,7496.0,15.0,3377.0,23.0,101.35,0.011
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",51,5483.77,0.867,0.0172,113.53,6600.0,6.0,1324.0,17.0,78.94,0.006
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",52,6110.77,0.8676,0.031,112.3,7396.0,10.0,3232.0,17.0,97.79,0.017
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",53,5818.44,0.8671,0.0232,114.27,7063.0,12.0,2290.0,20.0,118.51,0.0
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",54,6152.56,0.867,0.0396,113.87,7496.0,47.0,3349.0,29.0,81.91,0.003
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",55,6348.72,0.8678,0.0245,110.41,7616.0,16.0,3930.0,16.0,128.25,0.032
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",56,6233.69,0.867,0.04,113.61,7571.0,20.0,3562.0,25.0,102.62,0.006
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",57,5532.82,0.8666,0.0206,113.0,6691.0,30.0,1676.0,25.0,91.87,0.012
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",58,5742.56,0.867,0.0346,105.04,6954.0,7.0,3213.0,22.0,94.75,0.079
+"MAPPO, devices + edge, from single-device actors and the link-aware rule, critic warm-up",59,5758.71,0.8669,0.0356,107.25,6953.0,14.0,2970.0,21.0,86.27,0.06
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",0,6296.84,0.8656,0.029,108.41,7588.0,14.0,3983.0,14.0,80.43,0.051
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",1,5423.42,0.8645,0.0642,112.94,6740.0,5.0,1681.0,40.0,122.22,0.011
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",2,5953.04,0.8644,0.0333,112.22,7207.0,4.0,2783.0,35.0,64.66,0.018
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",3,6127.79,0.8649,0.0526,112.28,7529.0,22.0,3430.0,27.0,75.82,0.02
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",4,5338.2,0.8663,0.0388,114.58,6516.0,18.0,803.0,17.0,28.52,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",5,6153.89,0.8657,0.061,114.36,7641.0,24.0,3435.0,24.0,117.0,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",6,5890.08,0.8647,0.0547,108.95,7267.0,0.0,3263.0,28.0,109.66,0.046
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",7,6606.42,0.8663,0.0403,114.36,8064.0,11.0,4311.0,11.0,108.28,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",8,6113.02,0.8651,0.0665,108.13,7569.0,18.0,4014.0,23.0,117.96,0.053
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",9,5474.15,0.8655,0.0498,113.7,6726.0,1.0,1505.0,27.0,74.65,0.003
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",10,6182.91,0.8655,0.0465,110.65,7558.0,4.0,3660.0,23.0,123.88,0.031
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",11,5474.36,0.8656,0.0393,113.24,6694.0,0.0,1483.0,28.0,92.75,0.01
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",12,6156.32,0.8655,0.0498,111.73,7557.0,6.0,3535.0,16.0,110.43,0.022
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",13,5800.95,0.8655,0.0627,112.37,7212.0,0.0,2677.0,22.0,148.27,0.016
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",14,6183.65,0.8653,0.0584,112.15,7606.0,31.0,3606.0,26.0,90.05,0.02
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",15,6278.25,0.8658,0.0446,108.12,7647.0,11.0,4164.0,19.0,142.07,0.053
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",16,6244.64,0.8651,0.0592,111.28,7676.0,18.0,3871.0,18.0,127.51,0.024
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",17,5477.44,0.8655,0.0486,111.5,6753.0,25.0,1840.0,30.0,107.68,0.025
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",18,5732.0,0.8641,0.0621,102.71,7082.0,0.0,3583.0,18.0,105.61,0.102
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",19,5782.08,0.8646,0.0557,106.09,7074.0,2.0,3276.0,38.0,110.85,0.07
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",20,6360.58,0.8688,0.0253,108.49,7616.0,9.0,4002.0,11.0,81.58,0.05
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",21,5504.83,0.8676,0.055,112.49,6780.0,3.0,1812.0,38.0,133.21,0.014
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",22,6026.91,0.8683,0.0245,112.06,7220.0,1.0,2776.0,26.0,64.66,0.018
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",23,6151.32,0.8682,0.0488,111.98,7509.0,19.0,3440.0,26.0,75.77,0.021
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",24,5413.93,0.8685,0.0265,114.44,6537.0,7.0,836.0,13.0,29.06,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",25,6240.45,0.8685,0.0652,114.05,7711.0,14.0,3581.0,17.0,121.69,0.002
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",26,5994.88,0.8685,0.0444,109.02,7313.0,2.0,3331.0,19.0,110.43,0.047
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",27,6578.38,0.8682,0.0402,114.3,8010.0,2.0,4241.0,19.0,107.79,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",28,6171.5,0.8683,0.0638,107.83,7595.0,8.0,4125.0,18.0,122.76,0.056
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",29,5542.41,0.868,0.0471,113.76,6778.0,0.0,1606.0,29.0,76.72,0.003
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",30,6219.91,0.8681,0.0429,111.16,7562.0,1.0,3635.0,24.0,124.36,0.027
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",31,5511.79,0.8679,0.0389,113.03,6718.0,0.0,1540.0,25.0,92.75,0.011
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",32,6184.99,0.8683,0.0431,111.68,7535.0,0.0,3531.0,23.0,109.36,0.022
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",33,5924.35,0.8684,0.0515,112.42,7265.0,0.0,2794.0,20.0,153.9,0.015
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",34,6236.72,0.8682,0.0457,111.91,7587.0,31.0,3601.0,26.0,92.43,0.02
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",35,6303.25,0.8683,0.0462,108.01,7663.0,9.0,4257.0,24.0,144.17,0.053
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",36,6289.72,0.8682,0.0554,111.44,7684.0,11.0,3891.0,23.0,130.1,0.024
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",37,5536.15,0.8678,0.0387,111.51,6763.0,13.0,1848.0,35.0,111.04,0.024
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",38,5785.23,0.868,0.049,102.94,7061.0,0.0,3573.0,28.0,106.98,0.1
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",39,5822.8,0.868,0.0471,105.29,7056.0,0.0,3285.0,33.0,112.66,0.077
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",40,6295.09,0.8679,0.0211,110.68,7527.0,20.0,3658.0,12.0,69.6,0.032
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",41,5481.55,0.8665,0.0294,113.46,6665.0,5.0,1572.0,22.0,105.53,0.006
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",42,5876.62,0.8668,0.0195,113.67,7053.0,0.0,2413.0,18.0,55.37,0.005
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",43,6012.96,0.8672,0.0399,113.1,7311.0,28.0,2995.0,23.0,63.85,0.011
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",44,5374.54,0.8674,0.0166,114.53,6465.0,26.0,785.0,8.0,26.17,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",45,6161.51,0.8675,0.0468,114.25,7562.0,32.0,3368.0,16.0,103.99,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",46,5919.0,0.8673,0.0208,109.81,7125.0,4.0,2964.0,14.0,95.36,0.039
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",47,6410.18,0.8675,0.0345,114.41,7786.0,11.0,3835.0,21.0,90.32,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",48,6224.95,0.8674,0.0269,110.53,7500.0,18.0,3712.0,19.0,110.92,0.033
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",49,5511.92,0.8667,0.015,114.29,6642.0,3.0,1391.0,18.0,66.1,0.0
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",50,6192.56,0.8674,0.0307,113.11,7498.0,13.0,3382.0,24.0,101.05,0.011
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",51,5497.85,0.867,0.0129,113.41,6599.0,6.0,1329.0,17.0,78.27,0.006
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",52,6120.82,0.8677,0.0297,112.24,7401.0,10.0,3240.0,16.0,97.25,0.018
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",53,5865.98,0.8673,0.028,113.82,7119.0,17.0,2447.0,17.0,126.18,0.004
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",54,6168.03,0.8671,0.0371,113.79,7499.0,42.0,3341.0,27.0,80.58,0.003
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",55,6358.14,0.8678,0.0237,110.49,7625.0,16.0,3933.0,16.0,131.12,0.032
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",56,6203.21,0.8669,0.0397,113.61,7533.0,19.0,3500.0,26.0,99.45,0.005
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",57,5466.38,0.8666,0.0262,112.89,6626.0,27.0,1537.0,23.0,79.46,0.013
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",58,5725.89,0.8669,0.0352,105.17,6937.0,7.0,3172.0,23.0,93.06,0.078
+"MAPPO, devices (link-aware edge), from single-device actors, critic warm-up",59,5760.36,0.8667,0.036,107.83,6956.0,11.0,2930.0,24.0,83.16,0.055
