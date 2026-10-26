@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edgearbiter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Multi-agent RL for adaptive AI model selection on IoT-edge devices"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,10 +20,13 @@ dependencies = [
   "pydantic>=2.6",
   "paho-mqtt>=2.0",
   "pillow>=10.0",
+  "psutil>=5.9; platform_system != 'Linux'",   # benchmark peak memory off Linux (/proc is used on Linux)
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27", "python-multipart>=0.0.9"]
+dev = ["pytest>=8.0", "httpx>=0.27", "python-multipart>=0.0.9", "amqtt>=0.12"]
+iot = ["amqtt>=0.12"]                          # in-process MQTT broker: python -m edgearbiter.broker
+plot = ["matplotlib>=3.8"]
 
 [tool.setuptools.packages.find]
 include = ["edgearbiter*"]

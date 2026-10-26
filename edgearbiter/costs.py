@@ -5,11 +5,14 @@ accuracy, latency on the device and on the edge, energy per inference and input
 size. The real table is produced by `scripts/run_benchmark.py` (see
 `edgearbiter/benchmark.py`) and saved to `results/cost_table.json`. Until it
 exists, a clearly labelled synthetic default is used so the simulator and the
-agents can be developed and tested offline.
+agents can be developed and tested offline; `CostTable.load("synthetic")` selects
+it explicitly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,6 +27,7 @@ SYNTHETIC_TIERS: List[Dict] = [
 ]
 FRAME_KB = 40.0          # JPEG frame size sent when offloading
 TX_ENERGY_MJ_PER_KB = 0.25
+Z95 = 1.6448536269514722  # standard normal 95th percentile
 
 
 @dataclass
@@ -37,11 +41,28 @@ class CostTable:
     def n_tiers(self) -> int:
         return len(self.tiers)
 
+    @property
+    def fingerprint(self) -> str:
+        """Short hash of the numbers that drive the simulator (identifies a table whatever its path)."""
+        keys = ("accuracy", "latency_ms", "latency_p95_ms", "energy_mj")
+        data = [{k: t.get(k) for k in keys} for t in self.tiers] + [self.frame_kb, self.tx_energy_mj_per_kb]
+        return hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()[:12]
+
     def accuracy(self, tier: int) -> float:
         return float(self.tiers[tier]["accuracy"])
 
     def latency(self, tier: int, where: str) -> float:
+        """Median (p50) latency of one inference."""
         return float(self.tiers[tier]["latency_ms"][where])
+
+    def latency_sigma(self, tier: int, where: str) -> float:
+        """Log-spread of the per-inference latency: the log-normal through the measured median and p95.
+        0 when the table has no p95 for it (deterministic latency, as in the synthetic table)."""
+        p95 = (self.tiers[tier].get("latency_p95_ms") or {}).get(where)
+        p50 = self.latency(tier, where)
+        if not p95 or p95 <= p50:
+            return 0.0
+        return math.log(float(p95) / p50) / Z95
 
     def energy(self, tier: int) -> float:
         return float(self.tiers[tier]["energy_mj"])
@@ -55,7 +76,9 @@ class CostTable:
 
     @staticmethod
     def load(path: Optional[Path] = None) -> "CostTable":
-        """Load the measured table if present, else the synthetic default."""
+        """Load the measured table if present, else the synthetic default ("synthetic": always the latter)."""
+        if str(path) == "synthetic":
+            return CostTable.synthetic()
         path = Path(path or DEFAULT_TABLE_PATH)
         if not path.exists():
             return CostTable.synthetic()

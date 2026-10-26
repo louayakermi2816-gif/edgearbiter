@@ -11,8 +11,12 @@ models/*
 results/*
 !results/.gitkeep
 !results/*.md
+!results/*.json
+!results/*.csv
+!results/*.png
 .pytest_cache/
 .vscode/
 .idea/
 *.log
-!results/cost_table.json
+.pio/
+node_modules/

@@ -1,8 +1,16 @@
-"""Fine-tune MobileNetV3-Small on Imagenette (10 classes) with a plain PyTorch training loop.
+"""Train / fine-tune torchvision classifiers on Imagenette (10 classes) with a plain PyTorch loop.
 
-Data loaders with augmentation, AdamW + cosine schedule, per-epoch validation,
+Data loaders with augmentation, AdamW + one-cycle schedule, per-epoch validation,
 best-checkpoint saving and a metrics JSON. This is the supervised deep-learning
-part of the project; the resulting model can be benchmarked like any other tier.
+part of the project; the resulting models are the model tiers that the benchmark
+measures (FP32 and INT8, see `edgearbiter.quantize`) and that drive the simulator.
+
+Architectures: mobilenet_v3_small, mobilenet_v3_large, resnet18 (ImageNet head
+replaced by a 10-class head). `pretrained=True` fine-tunes from the torchvision
+ImageNet weights; `pretrained=False` trains the same network from random
+initialisation (no weight download). Each run writes its own checkpoint:
+    models/<arch>_imagenette.pt           ImageNet init (fine-tuning)
+    models/<arch>_imagenette_scratch.pt   random init
 """
 from __future__ import annotations
 
@@ -15,9 +23,15 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from .data import eval_transform, imagenette, loader, train_transform
+
+ARCHS = ("mobilenet_v3_small", "mobilenet_v3_large", "resnet18")
+ARCH_NAMES = {"mobilenet_v3_small": "MobileNetV3-Small", "mobilenet_v3_large": "MobileNetV3-Large", "resnet18": "ResNet-18"}
+
 
 @dataclass
 class FinetuneConfig:
+    arch: str = "mobilenet_v3_small"
     data_root: str = "data"
     size: str = "160px"
     epochs: int = 5
@@ -27,35 +41,64 @@ class FinetuneConfig:
     img: int = 128
     num_workers: int = 0
     freeze_features: bool = False
+    pretrained: bool = True                # False: random initialisation (train from scratch)
+    threads: Optional[int] = None          # torch intra-op threads (None = torch default)
     seed: int = 0
     out_dir: str = "models"
     max_batches: Optional[int] = None      # for smoke tests
 
+    @property
+    def init(self) -> str:
+        return "imagenet" if self.pretrained else "scratch"
 
-MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+
+def checkpoint_path(out_dir: str = "models", init: str = "imagenet", arch: str = "mobilenet_v3_small") -> Path:
+    return Path(out_dir) / (f"{arch}_imagenette" + ("" if init == "imagenet" else f"_{init}") + ".pt")
+
+
+def read_metrics(ckpt: Path) -> Optional[dict]:
+    path = Path(ckpt).with_suffix(".json")
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def report(metrics: dict) -> str:
+    """Markdown summary of a training run (per-epoch loss / validation accuracy)."""
+    cfg = metrics["config"]
+    arch = ARCH_NAMES.get(cfg.get("arch", "mobilenet_v3_small"), cfg.get("arch"))
+    lines = [f"{arch} on Imagenette ({cfg['size']} release, {cfg['img']}px input), **{metrics['init']}** "
+             f"initialisation · {cfg['epochs']} epochs · batch {cfg['batch_size']} · AdamW, one-cycle lr {cfg['lr']} · "
+             f"best validation top-1 (10 classes, {cfg['img']}px centre crop): **{100 * metrics['best_val_top1']:.1f}%** · "
+             f"{metrics['train_seconds'] / 60:.0f} min on CPU ({cfg['threads'] or 'default'} threads)", "",
+             "| epoch | train loss | val top-1 | seconds |", "|---|---|---|---|"]
+    lines += [f"| {h['epoch']} | {h['train_loss']:.3f} | {100 * h['val_top1']:.1f}% | {h['seconds']} |" for h in metrics["history"]]
+    return "\n".join(lines) + "\n"
 
 
 def build_loaders(cfg: FinetuneConfig, download: bool = True):
-    import torchvision.transforms as T
-    from torchvision.datasets import Imagenette
-    train_tf = T.Compose([T.RandomResizedCrop(cfg.img, scale=(0.5, 1.0)), T.RandomHorizontalFlip(),
-                          T.ColorJitter(0.2, 0.2, 0.2), T.ToTensor(), T.Normalize(MEAN, STD)])
-    val_tf = T.Compose([T.Resize(int(cfg.img * 1.15)), T.CenterCrop(cfg.img), T.ToTensor(), T.Normalize(MEAN, STD)])
-    train = Imagenette(cfg.data_root, split="train", size=cfg.size, download=download, transform=train_tf)
-    val = Imagenette(cfg.data_root, split="val", size=cfg.size, download=False, transform=val_tf)
-    mk = lambda ds, shuffle: torch.utils.data.DataLoader(ds, batch_size=cfg.batch_size, shuffle=shuffle, num_workers=cfg.num_workers)
-    return mk(train, True), mk(val, False)
+    train = imagenette(cfg.data_root, "train", size=cfg.size, download=download, transform=train_transform(cfg.img))
+    val = imagenette(cfg.data_root, "val", size=cfg.size, download=False, transform=eval_transform(cfg.img))
+    return (loader(train, cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, seed=cfg.seed),
+            loader(val, cfg.batch_size, num_workers=cfg.num_workers))
 
 
-def build_model(n_classes: int = 10, pretrained: bool = True, freeze_features: bool = False) -> nn.Module:
+def build_model(n_classes: int = 10, pretrained: bool = True, freeze_features: bool = False,
+                arch: str = "mobilenet_v3_small") -> nn.Module:
+    """torchvision architecture with a fresh `n_classes` head (ImageNet weights when `pretrained`)."""
     import torchvision.models as tvm
-    weights = tvm.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
-    model = tvm.mobilenet_v3_small(weights=weights)
+    if arch not in ARCHS:
+        raise ValueError(f"arch must be one of {ARCHS}")
+    weights = {"mobilenet_v3_small": tvm.MobileNet_V3_Small_Weights, "mobilenet_v3_large": tvm.MobileNet_V3_Large_Weights,
+               "resnet18": tvm.ResNet18_Weights}[arch].DEFAULT if pretrained else None
+    model = getattr(tvm, arch)(weights=weights)
+    if arch == "resnet18":
+        body, model.fc = [m for n, m in model.named_children() if n != "fc"], nn.Linear(model.fc.in_features, n_classes)
+    else:
+        body = [model.features]
+        model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, n_classes)
     if freeze_features:
-        for p in model.features.parameters():
-            p.requires_grad = False
-    in_features = model.classifier[-1].in_features
-    model.classifier[-1] = nn.Linear(in_features, n_classes)
+        for module in body:
+            for p in module.parameters():
+                p.requires_grad = False
     return model
 
 
@@ -71,19 +114,21 @@ def evaluate(model: nn.Module, loader, max_batches: Optional[int] = None) -> flo
 
 def train(model: nn.Module, train_loader, val_loader, cfg: FinetuneConfig, log=print) -> dict:
     torch.manual_seed(cfg.seed)
+    if cfg.threads:
+        torch.set_num_threads(cfg.threads)
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
-    steps_per_epoch = cfg.max_batches or len(train_loader)
+    steps_per_epoch = min(cfg.max_batches or len(train_loader), len(train_loader))
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=cfg.lr, total_steps=max(1, cfg.epochs * steps_per_epoch))
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
-    out = Path(cfg.out_dir); out.mkdir(parents=True, exist_ok=True)
-    best, history = 0.0, []
+    ckpt = checkpoint_path(cfg.out_dir, cfg.init, cfg.arch); ckpt.parent.mkdir(parents=True, exist_ok=True)
+    best, history, t_start = 0.0, [], time.time()
     for epoch in range(cfg.epochs):
         model.train(); t0 = time.time(); running = 0.0; n = 0
         for b, (x, y) in enumerate(train_loader):
             loss = loss_fn(model(x), y)
             opt.zero_grad(); loss.backward(); opt.step(); sched.step()
-            running += float(loss) * len(y); n += len(y)
+            running += loss.item() * len(y); n += len(y)
             if cfg.max_batches and b + 1 >= cfg.max_batches:
                 break
         acc = evaluate(model, val_loader, cfg.max_batches)
@@ -91,7 +136,8 @@ def train(model: nn.Module, train_loader, val_loader, cfg: FinetuneConfig, log=p
         if log:
             log(history[-1])
         if acc >= best:
-            best = acc; torch.save(model.state_dict(), out / "mobilenetv3_small_imagenette.pt")
-    metrics = {"best_val_top1": best, "history": history, "config": asdict(cfg)}
-    (out / "mobilenetv3_small_imagenette.json").write_text(json.dumps(metrics, indent=1), encoding="utf-8")
+            best = acc; torch.save(model.state_dict(), ckpt)
+    metrics = {"init": cfg.init, "best_val_top1": best, "train_seconds": round(time.time() - t_start, 1),
+               "history": history, "config": asdict(cfg)}
+    ckpt.with_suffix(".json").write_text(json.dumps(metrics, indent=1), encoding="utf-8")
     return metrics

@@ -1,0 +1,97 @@
+{
+ "tiers": [
+  {
+   "name": "tiny",
+   "model": "mobilenet_v3_small_imagenette_scratch",
+   "accuracy": 0.8262420382165605,
+   "latency_ms": {
+    "device": 55.41,
+    "edge": 9.08
+   },
+   "latency_p95_ms": {
+    "device": 74.99,
+    "edge": 13.63
+   },
+   "energy_mj": 24.93,
+   "size_mb": 6.24,
+   "memory_mb": 12.2,
+   "edge_measured": true,
+   "edge_threads": 1
+  },
+  {
+   "name": "small",
+   "model": "mobilenet_v3_large_imagenette_scratch_int8",
+   "accuracy": 0.8361783439490446,
+   "latency_ms": {
+    "device": 78.47,
+    "edge": 11.46
+   },
+   "latency_p95_ms": {
+    "device": 109.35,
+    "edge": 13.3
+   },
+   "energy_mj": 35.31,
+   "size_mb": 4.7,
+   "memory_mb": 13.3,
+   "edge_measured": true,
+   "edge_threads": 2
+  },
+  {
+   "name": "medium",
+   "model": "resnet18_imagenette_scratch_int8",
+   "accuracy": 0.8690445859872612,
+   "latency_ms": {
+    "device": 40.26,
+    "edge": 4.99
+   },
+   "latency_p95_ms": {
+    "device": 56.51,
+    "edge": 7.08
+   },
+   "energy_mj": 18.11,
+   "size_mb": 11.31,
+   "memory_mb": 26.1,
+   "edge_measured": true,
+   "edge_threads": 4
+  }
+ ],
+ "frame_kb": 40.0,
+ "tx_energy_mj_per_kb": 0.25,
+ "source": "benchmark",
+ "meta": {
+  "device": {
+   "benchmark": "results/benchmark_device_imagenette.json",
+   "host": {
+    "label": "emulated device (1 thread, 0.25 CPU)",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "logical_cpus": 4,
+    "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+    "python": "3.13.17",
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "date_utc": "2026-10-23T20:25:07Z"
+   },
+   "cpu_quota": [
+    0.25
+   ]
+  },
+  "edge": {
+   "benchmark": "results/benchmark_edge_imagenette.json",
+   "host": {
+    "label": "edge (this VM)",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "logical_cpus": 4,
+    "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+    "python": "3.13.17",
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "date_utc": "2026-10-23T20:30:34Z"
+   }
+  },
+  "tier_selection": [
+   "tiny: mobilenet_v3_small FP32 (device p50 INT8 60.9 vs FP32 55.4 ms, top-1 82.5 vs 82.6 %)",
+   "small: mobilenet_v3_large INT8 (device p50 INT8 78.5 vs FP32 100.7 ms, top-1 83.6 vs 83.9 %)",
+   "medium: resnet18 INT8 (device p50 INT8 40.3 vs FP32 146.0 ms, top-1 86.9 vs 86.7 %)"
+  ]
+ }
+}

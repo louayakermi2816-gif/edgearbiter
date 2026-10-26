@@ -1,0 +1,146 @@
+{
+ "host": {
+  "label": "emulated device (1 thread, 0.25 CPU)",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "logical_cpus": 4,
+  "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+  "python": "3.13.17",
+  "torch": "2.14.1+cu130",
+  "torchvision": "0.29.1+cu130",
+  "date_utc": "2026-10-23T20:25:07Z"
+ },
+ "rows": [
+  {
+   "model": "mobilenet_v3_small_imagenette_scratch",
+   "role": "device",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 55.4105384999275,
+    "p95": 74.98680060034529,
+    "mean": 55.56778446516546
+   },
+   "size_mb": 6.24,
+   "memory_mb": 12.2,
+   "inference_mem_mb": 6.0,
+   "rss_peak_mb": 729.7,
+   "accuracy": 0.8262420382165605,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "mobilenet_v3_small_imagenette_scratch_int8",
+   "role": "device",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 60.900807000507484,
+    "p95": 85.72390335084488,
+    "mean": 63.998587419791875
+   },
+   "size_mb": 1.83,
+   "memory_mb": 8.5,
+   "inference_mem_mb": 6.7,
+   "rss_peak_mb": 748.8,
+   "accuracy": 0.8252229299363057,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "mobilenet_v3_large_imagenette_scratch",
+   "role": "device",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 100.7405309992464,
+    "p95": 137.15244330196583,
+    "mean": 104.16449101501712
+   },
+   "size_mb": 17.06,
+   "memory_mb": 26.7,
+   "inference_mem_mb": 9.6,
+   "rss_peak_mb": 744.4,
+   "accuracy": 0.8392356687898089,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "mobilenet_v3_large_imagenette_scratch_int8",
+   "role": "device",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 78.46618299845431,
+    "p95": 109.35333945162708,
+    "mean": 79.71393955993335
+   },
+   "size_mb": 4.7,
+   "memory_mb": 13.3,
+   "inference_mem_mb": 8.6,
+   "rss_peak_mb": 770.0,
+   "accuracy": 0.8361783439490446,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "resnet18_imagenette_scratch",
+   "role": "device",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 145.9500505006872,
+    "p95": 191.5239392028525,
+    "mean": 151.49527876495995
+   },
+   "size_mb": 44.8,
+   "memory_mb": 53.0,
+   "inference_mem_mb": 8.2,
+   "rss_peak_mb": 769.9,
+   "accuracy": 0.8672611464968153,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "resnet18_imagenette_scratch_int8",
+   "role": "device",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "trained",
+   "img": 128,
+   "threads": 1,
+   "cpu_quota": 0.25,
+   "latency_ms": {
+    "p50": 40.25501400064968,
+    "p95": 56.50978605117415,
+    "mean": 42.05852910501562
+   },
+   "size_mb": 11.31,
+   "memory_mb": 26.1,
+   "inference_mem_mb": 14.8,
+   "rss_peak_mb": 807.8,
+   "accuracy": 0.8690445859872612,
+   "accuracy_metric": "imagenette_10way_top1"
+  }
+ ]
+}

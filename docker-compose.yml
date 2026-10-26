@@ -1,21 +1,34 @@
+# Whole IoT loop in software: broker + policy service + Node-RED board + virtual ESP32 node.
+#   docker compose up --build      then open http://localhost:1880/dashboard
 services:
-  api:
-    build: .
-    environment:
-      MQTT_HOST: mosquitto
-      MQTT_TOPIC: edgearbiter
-    ports: ["8000:8000"]
-    depends_on: [mosquitto]
-
   mosquitto:
     image: eclipse-mosquitto:2
     ports: ["1883:1883"]
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
-  nodered:
-    image: nodered/node-red:latest
-    ports: ["1880:1880"]
+  api:
+    build: .
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_TOPIC: edgearbiter
+      # trained actors (scripts/run_experiments.py writes models/<study>/<scenario>/...); without them the rules answer
+      # MODEL_DEVICE: /app/models/experiments/default/mappo_seed0_device.pt
+      # MODEL_EDGE: /app/models/experiments/default/mappo_seed0_edge.pt
     volumes:
-      - ./node-red:/data/projects/edgearbiter:ro
+      - ./models:/app/models:ro
+    ports: ["8000:8000"]
     depends_on: [mosquitto]
+
+  nodered:
+    build: ./node-red
+    environment:
+      MQTT_HOST: mosquitto
+      API_URL: http://api:8000
+    ports: ["1880:1880"]
+    depends_on: [mosquitto, api]
+
+  virtual-node:                       # software stand-in for the ESP32 node (no hardware needed)
+    build: .
+    command: ["python", "-m", "edgearbiter.virtual_node", "--broker", "mosquitto", "--interval", "1.0"]
+    depends_on: [mosquitto, nodered]

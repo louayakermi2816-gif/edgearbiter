@@ -2,13 +2,23 @@
 
 Two variants, selected by `centralized_critic`:
     IPPO  - each agent has its own actor and its own critic on its own observation
-    MAPPO - each agent has its own actor; critics see the joint observation
-Both are trained with a shared team reward. Any agent not listed in `controlled`
+    MAPPO - each agent has its own actor; one shared critic sees the joint observation
+            (centralised training, decentralised execution)
+Both are trained with the shared team reward. Any agent not listed in `controlled`
 follows a fixed policy (e.g. the rule-based edge), which is how single-agent
 training of the device is done.
+
+Implementation choices follow Yu et al., "The Surprising Effectiveness of PPO in
+Cooperative Multi-Agent Games" (NeurIPS 2022): value targets are normalised with
+running statistics, actors and critics have separate optimisers and gradient
+clipping, rollouts come from `n_envs` simulator copies stepped in lock-step, and
+the learning rate is annealed linearly. Actors can be warm-started by behaviour cloning
+of a fixed policy (`init_policies`), e.g. the edge's existing admission rule, which avoids
+the "nobody offloads" equilibrium that joint training from scratch tends to fall into.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -22,19 +32,49 @@ def mlp(inp: int, out: int, hidden: int, act=nn.Tanh) -> nn.Sequential:
     return nn.Sequential(nn.Linear(inp, hidden), act(), nn.Linear(hidden, hidden), act(), nn.Linear(hidden, out))
 
 
+class FactoredCategorical:
+    """Independent categoricals over the digits of a mixed-radix joint action index.
+
+    factors=(n_tiers, n_rates, 2) turns the device's joint index into separate tier, rate and
+    placement heads; factors=(n,) is a plain categorical over n actions."""
+
+    def __init__(self, logits: torch.Tensor, factors: Sequence[int]):
+        self.factors = tuple(factors)
+        self.parts = [Categorical(logits=l, validate_args=False) for l in torch.split(logits, self.factors, dim=-1)]
+        self.place = [int(np.prod(self.factors[i + 1:])) for i in range(len(self.factors))]
+
+    def _digits(self, a: torch.Tensor):
+        return [torch.div(a, w, rounding_mode="floor") % f for w, f in zip(self.place, self.factors)]
+
+    def sample(self) -> torch.Tensor:
+        return sum(p.sample() * w for p, w in zip(self.parts, self.place))
+
+    def log_prob(self, a: torch.Tensor) -> torch.Tensor:
+        return sum(p.log_prob(d) for p, d in zip(self.parts, self._digits(a)))
+
+    def entropy(self) -> torch.Tensor:
+        return sum(p.entropy() for p in self.parts)
+
+    def mode(self) -> torch.Tensor:
+        return sum(p.logits.argmax(-1) * w for p, w in zip(self.parts, self.place))
+
+
 class Actor(nn.Module):
-    def __init__(self, obs_dim: int, n_actions: int, hidden: int = 128):
+    def __init__(self, obs_dim: int, n_actions: int, hidden: int = 128, factors: Optional[Sequence[int]] = None):
         super().__init__()
-        self.net = mlp(obs_dim, n_actions, hidden)
+        self.factors = tuple(int(f) for f in (factors or (n_actions,)))     # plain ints: checkpoints load weights_only
+        if int(np.prod(self.factors)) != n_actions:
+            raise ValueError(f"factors {self.factors} do not multiply to {n_actions} actions")
+        self.net = mlp(obs_dim, sum(self.factors), hidden)
         nn.init.orthogonal_(self.net[-1].weight, gain=0.01); nn.init.zeros_(self.net[-1].bias)
 
-    def dist(self, obs: torch.Tensor) -> Categorical:
-        return Categorical(logits=self.net(obs))
+    def dist(self, obs: torch.Tensor) -> FactoredCategorical:
+        return FactoredCategorical(self.net(obs), self.factors)
 
     @torch.no_grad()
     def act(self, obs: np.ndarray, deterministic: bool = True) -> int:
         d = self.dist(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0))
-        return int((d.probs.argmax(-1) if deterministic else d.sample()).item())
+        return int((d.mode() if deterministic else d.sample()).item())
 
 
 class Critic(nn.Module):
@@ -46,26 +86,62 @@ class Critic(nn.Module):
         return self.net(obs).squeeze(-1)
 
 
+class RunningNorm:
+    """Running mean / variance of the value targets (parallel Welford update)."""
+
+    def __init__(self):
+        self.mean, self.var, self.count = 0.0, 1.0, 1e-4
+
+    def update(self, x: np.ndarray) -> None:
+        x = np.asarray(x, dtype=np.float64)
+        bm, bv, n = float(x.mean()), float(x.var()), x.size
+        d, tot = bm - self.mean, self.count + n
+        self.mean += d * n / tot
+        self.var = (self.var * self.count + bv * n + d * d * self.count * n / tot) / tot
+        self.count = tot
+
+    @property
+    def std(self) -> float:
+        return float(np.sqrt(self.var)) + 1e-8
+
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        return x * self.std + self.mean
+
+
 @dataclass
 class MAPPOConfig:
-    total_steps: int = 60_000
-    rollout_len: int = 600
-    epochs: int = 4
-    minibatch: int = 100
-    lr: float = 3e-4
+    total_steps: int = 60_000           # environment steps, summed over the parallel envs
+    n_envs: int = 8
+    rollout_len: int = 128              # steps per env per update (batch = n_envs * rollout_len)
+    epochs: int = 5
+    minibatch: int = 256
+    lr: float = 3e-4                    # actor learning rate
+    critic_lr: float = 1e-3
+    anneal_lr: bool = True
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip: float = 0.2
     ent_coef: float = 0.01
-    vf_coef: float = 0.5
+    ent_coefs: Optional[Dict[str, float]] = None   # per-agent overrides of ent_coef, e.g. {"edge": 0.001}
     max_grad_norm: float = 0.5
     hidden: int = 128
+    factorized: bool = False            # one policy head per action factor (env.action_factors) instead of one softmax
+    value_norm: bool = True
     seed: int = 0
     centralized_critic: bool = True     # True = MAPPO, False = IPPO
+    bc_steps: int = 20_000              # environment steps of teacher data for `init_policies` warm starts
+    bc_smoothing: float = 0.2           # label smoothing of the warm start (lower = closer to the teacher)
+    critic_warmup_steps: int = 0        # env steps of critic-only updates first (actors frozen): after a warm
+                                        # start, the critics learn the warm-started policy's values before it moves
+    callback_every: int = 0             # env steps between `callback(steps, actors)` calls (0 = never)
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
-    T = len(rewards); adv = np.zeros(T, np.float32); last = 0.0
+    """Generalised advantage estimation over arrays of shape (T,) or (T, n_envs)."""
+    T = len(rewards); adv = np.zeros_like(np.asarray(rewards), dtype=np.float32); last = 0.0
     for t in reversed(range(T)):
         nv = last_value if t == T - 1 else values[t + 1]
         nonterm = 1.0 - dones[t]
@@ -78,71 +154,189 @@ def gae(rewards, values, dones, last_value, gamma, lam):
 FixedPolicy = Callable[[Dict[str, np.ndarray], object], int]
 
 
+def behaviour_clone(actors: Dict[str, Actor], teachers: Dict[str, FixedPolicy], env, steps: int = 20_000,
+                    epochs: int = 10, smoothing: float = 0.2, seed: int = 0) -> Dict[str, float]:
+    """Initialise actors by imitating fixed policies (cross-entropy on the teachers' actions).
+
+    States come from the teachers acting, with every other agent acting uniformly at random so
+    the visited states are diverse. Label smoothing keeps some entropy for the PPO phase that
+    follows. Returns the agreement (argmax accuracy) of each actor with its teacher."""
+    rng = np.random.default_rng(seed)
+    obs, _ = env.reset(seed=seed)
+    data = {a: ([], []) for a in teachers}
+    for _ in range(steps):
+        actions = {a: (teachers[a](obs, env) if a in teachers else int(rng.integers(env.action_spaces[a].n)))
+                   for a in env.action_spaces}
+        for a in teachers:
+            data[a][0].append(obs[a]); data[a][1].append(actions[a])
+        obs, _, term, trunc, _ = env.step(actions)
+        if term or trunc:
+            obs, _ = env.reset()
+    agreement = {}
+    for a, (xs, ys) in data.items():
+        x, y = torch.as_tensor(np.array(xs)), torch.as_tensor(ys)
+        opt = torch.optim.Adam(actors[a].parameters(), lr=1e-3)
+        n_classes = actors[a].factors
+        for _ in range(epochs):
+            for mb in torch.randperm(len(x)).split(256):
+                d = actors[a].dist(x[mb])
+                digits = d._digits(y[mb])
+                loss = sum(torch.nn.functional.cross_entropy(p.logits, t, label_smoothing=smoothing)
+                           for p, t in zip(d.parts, digits)) / len(n_classes)
+                opt.zero_grad(); loss.backward(); opt.step()
+        with torch.no_grad():
+            agreement[a] = float((actors[a].dist(x).mode() == y).float().mean())
+    return agreement
+
+
 def train_mappo(env, cfg: MAPPOConfig = MAPPOConfig(), controlled: Sequence[str] = ("device", "edge"),
-                fixed_policies: Optional[Dict[str, FixedPolicy]] = None, log: Optional[Callable] = print):
+                fixed_policies: Optional[Dict[str, FixedPolicy]] = None, log: Optional[Callable] = print,
+                callback: Optional[Callable[[int, Dict[str, Actor]], None]] = None,
+                init_policies: Optional[Dict[str, FixedPolicy]] = None):
+    """Train the `controlled` agents; returns (actors, critics, history of training episodes).
+
+    `init_policies` warm-starts controlled actors by behaviour cloning of fixed policies (e.g. the
+    edge's admission rule) before the PPO updates. With a centralised critic, `critics` maps every
+    controlled agent to the same shared critic."""
     torch.manual_seed(cfg.seed); np.random.seed(cfg.seed)
     fixed_policies = fixed_policies or {}
-    obs_dims = {a: env.observation_spaces[a].shape[0] for a in env.observation_spaces}
-    joint_dim = sum(obs_dims.values())
-    actors = {a: Actor(obs_dims[a], env.action_spaces[a].n, cfg.hidden) for a in controlled}
-    critics = {a: Critic(joint_dim if cfg.centralized_critic else obs_dims[a], cfg.hidden) for a in controlled}
-    params = [p for a in controlled for p in list(actors[a].parameters()) + list(critics[a].parameters())]
-    opt = torch.optim.Adam(params, lr=cfg.lr, eps=1e-5)
+    agents = list(env.observation_spaces)
+    envs = [env] + [copy.deepcopy(env) for _ in range(cfg.n_envs - 1)]
+    obs_dims = {a: env.observation_spaces[a].shape[0] for a in agents}
+    factors = getattr(env, "action_factors", {}) if cfg.factorized else {}
+    actors = {a: Actor(obs_dims[a], env.action_spaces[a].n, cfg.hidden, factors.get(a)) for a in controlled}
+    teachers = {a: p for a, p in (init_policies or {}).items() if a in actors}
+    if teachers:
+        agreement = behaviour_clone(actors, teachers, copy.deepcopy(env), steps=cfg.bc_steps,
+                                    smoothing=cfg.bc_smoothing, seed=cfg.seed)
+        if log:
+            log({"behaviour_cloning": agreement})
+    if cfg.centralized_critic:
+        critics = {"team": Critic(sum(obs_dims.values()), cfg.hidden)}
+        value_of = {a: "team" for a in controlled}
+    else:
+        critics = {a: Critic(obs_dims[a], cfg.hidden) for a in controlled}
+        value_of = {a: a for a in controlled}
+    norms = {k: RunningNorm() for k in critics}
+    a_opt = {a: torch.optim.Adam(actors[a].parameters(), lr=cfg.lr, eps=1e-5) for a in controlled}
+    c_opt = {k: torch.optim.Adam(c.parameters(), lr=cfg.critic_lr, eps=1e-5) for k, c in critics.items()}
 
-    def critic_input(a, obs):
-        return env.joint_obs(obs) if cfg.centralized_critic else obs[a]
+    def critic_inputs(ob: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        joint = np.concatenate([ob[a] for a in agents], axis=-1)
+        return {k: joint if k == "team" else ob[k] for k in critics}
 
-    obs, _ = env.reset(seed=cfg.seed)
-    ep_ret, history, steps = 0.0, [], 0
+    def values(cin: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        with torch.no_grad():
+            out = {k: critics[k](torch.as_tensor(cin[k], dtype=torch.float32)).numpy() for k in critics}
+        return {k: norms[k].denormalize(v) if cfg.value_norm else v for k, v in out.items()}
+
+    obs_list = [e.reset(seed=cfg.seed * 10_000 + i)[0] for i, e in enumerate(envs)]
+    ep_ret = np.zeros(cfg.n_envs)
+    history: List[dict] = []
+    steps, update, next_callback = 0, 0, cfg.callback_every
+    n_updates = max(1, -(-cfg.total_steps // (cfg.n_envs * cfg.rollout_len)))
+    T, N = cfg.rollout_len, cfg.n_envs
     while steps < cfg.total_steps:
-        B = {a: {"obs": [], "cobs": [], "act": [], "logp": [], "val": []} for a in controlled}
-        rew, done = [], []
-        for _ in range(cfg.rollout_len):
-            actions = {}
+        update += 1
+        if cfg.anneal_lr:
+            frac = 1.0 - (update - 1) / n_updates
+            for o in a_opt.values():
+                o.param_groups[0]["lr"] = frac * cfg.lr
+            for o in c_opt.values():
+                o.param_groups[0]["lr"] = frac * cfg.critic_lr
+        buf_obs = {a: np.zeros((T, N, obs_dims[a]), np.float32) for a in controlled}
+        buf_cin = {k: np.zeros((T, N, critics[k].net[0].in_features), np.float32) for k in critics}
+        buf_act = {a: np.zeros((T, N), np.int64) for a in controlled}
+        buf_logp = {a: np.zeros((T, N), np.float32) for a in controlled}
+        buf_val = {k: np.zeros((T, N), np.float32) for k in critics}
+        rew, done = np.zeros((T, N), np.float32), np.zeros((T, N), np.float32)
+        finished = []
+        for t in range(T):
+            ob = {a: np.stack([o[a] for o in obs_list]) for a in agents}
+            cin = critic_inputs(ob)
+            for k, v in values(cin).items():
+                buf_cin[k][t], buf_val[k][t] = cin[k], v
+            actions = [dict() for _ in range(N)]
             for a in controlled:
-                t_obs = torch.as_tensor(obs[a], dtype=torch.float32)
                 with torch.no_grad():
-                    d = actors[a].dist(t_obs.unsqueeze(0)); act = d.sample(); logp = d.log_prob(act)
-                    val = critics[a](torch.as_tensor(critic_input(a, obs), dtype=torch.float32).unsqueeze(0))
-                actions[a] = int(act.item())
-                B[a]["obs"].append(obs[a]); B[a]["cobs"].append(critic_input(a, obs))
-                B[a]["act"].append(int(act.item())); B[a]["logp"].append(float(logp)); B[a]["val"].append(float(val))
-            for a, pol in fixed_policies.items():
-                if a not in actions:
-                    actions[a] = pol(obs, env)
-            next_obs, r, term, trunc, info = env.step(actions)
-            rew.append(float(r)); done.append(float(term or trunc)); ep_ret += r; steps += 1
-            if term or trunc:
-                history.append({"steps": steps, "return": ep_ret, "kpis": info["kpis"]})
-                if log:
-                    log({"steps": steps, "return": round(ep_ret, 1), **{k: info["kpis"][k] for k in ("mean_accuracy", "violation_rate", "energy_j")}})
-                ep_ret = 0.0
-                next_obs, _ = env.reset()
-            obs = next_obs
+                    d = actors[a].dist(torch.as_tensor(ob[a])); act = d.sample(); logp = d.log_prob(act)
+                act = act.numpy()
+                buf_obs[a][t], buf_act[a][t], buf_logp[a][t] = ob[a], act, logp.numpy()
+                for i in range(N):
+                    actions[i][a] = int(act[i])
+            for i, e in enumerate(envs):
+                for a, pol in fixed_policies.items():
+                    if a not in actions[i]:
+                        actions[i][a] = pol(obs_list[i], e)
+                next_obs, r, term, trunc, info = e.step(actions[i])
+                rew[t, i], done[t, i] = r, float(term or trunc); ep_ret[i] += r
+                if term or trunc:
+                    finished.append({"steps": steps + (t + 1) * N, "return": float(ep_ret[i]), "kpis": info["kpis"]})
+                    ep_ret[i] = 0.0
+                    next_obs, _ = e.reset()
+                obs_list[i] = next_obs
+        steps += T * N
+        history += finished
+        if log and finished:
+            mean = lambda key: round(float(np.mean([f["kpis"][key] for f in finished])), 3)
+            log({"steps": steps, "episodes": len(finished), "return": round(float(np.mean([f["return"] for f in finished])), 1),
+                 "mean_accuracy": mean("mean_accuracy"), "violation_rate": mean("violation_rate"), "energy_j": mean("energy_j")})
 
-        for a in controlled:
-            with torch.no_grad():
-                last_v = float(critics[a](torch.as_tensor(critic_input(a, obs), dtype=torch.float32).unsqueeze(0)))
-            adv, ret = gae(np.array(rew), np.array(B[a]["val"]), np.array(done), last_v, cfg.gamma, cfg.gae_lambda)
-            t_obs = torch.as_tensor(np.array(B[a]["obs"]), dtype=torch.float32)
-            t_cobs = torch.as_tensor(np.array(B[a]["cobs"]), dtype=torch.float32)
-            t_act = torch.as_tensor(B[a]["act"]); t_logp = torch.as_tensor(B[a]["logp"])
-            t_adv = torch.as_tensor(adv); t_adv = (t_adv - t_adv.mean()) / (t_adv.std() + 1e-8)
-            t_ret = torch.as_tensor(ret)
-            n = len(t_obs)
-            for _ in range(cfg.epochs):
-                idx = torch.randperm(n)
-                for s in range(0, n, cfg.minibatch):
-                    mb = idx[s:s + cfg.minibatch]
-                    d = actors[a].dist(t_obs[mb]); logp = d.log_prob(t_act[mb])
-                    ratio = torch.exp(logp - t_logp[mb])
-                    surr = torch.min(ratio * t_adv[mb], torch.clamp(ratio, 1 - cfg.clip, 1 + cfg.clip) * t_adv[mb])
-                    v = critics[a](t_cobs[mb])
-                    loss = -surr.mean() + cfg.vf_coef * (v - t_ret[mb]).pow(2).mean() - cfg.ent_coef * d.entropy().mean()
-                    opt.zero_grad(); loss.backward()
-                    nn.utils.clip_grad_norm_(params, cfg.max_grad_norm); opt.step()
-    return actors, critics, history
+        # advantages and value targets (raw reward scale), then normalised targets for the critics
+        last_v = values(critic_inputs({a: np.stack([o[a] for o in obs_list]) for a in agents}))
+        adv, ret_n = {}, {}
+        for k in critics:
+            adv_k, ret_k = gae(rew, buf_val[k], done, last_v[k], cfg.gamma, cfg.gae_lambda)
+            if cfg.value_norm:
+                norms[k].update(ret_k)
+                ret_k = norms[k].normalize(ret_k)
+            adv_k = (adv_k - adv_k.mean()) / (adv_k.std() + 1e-8)
+            adv[k], ret_n[k] = torch.as_tensor(adv_k.reshape(-1)), torch.as_tensor(ret_k.reshape(-1), dtype=torch.float32)
+        t_cin = {k: torch.as_tensor(buf_cin[k].reshape(T * N, -1)) for k in critics}
+        t_obs = {a: torch.as_tensor(buf_obs[a].reshape(T * N, -1)) for a in controlled}
+        t_act = {a: torch.as_tensor(buf_act[a].reshape(-1)) for a in controlled}
+        t_logp = {a: torch.as_tensor(buf_logp[a].reshape(-1)) for a in controlled}
+        B = T * N
+        actors_frozen = steps <= cfg.critic_warmup_steps
+        for _ in range(cfg.epochs):
+            perm = torch.randperm(B)
+            for s in range(0, B, cfg.minibatch):
+                mb = perm[s:s + cfg.minibatch]
+                for k, critic in critics.items():
+                    loss_v = (critic(t_cin[k][mb]) - ret_n[k][mb]).pow(2).mean()
+                    c_opt[k].zero_grad(); loss_v.backward()
+                    nn.utils.clip_grad_norm_(critic.parameters(), cfg.max_grad_norm); c_opt[k].step()
+                for a in ([] if actors_frozen else controlled):
+                    d = actors[a].dist(t_obs[a][mb])
+                    ratio = torch.exp(d.log_prob(t_act[a][mb]) - t_logp[a][mb])
+                    adv_mb = adv[value_of[a]][mb]
+                    surr = torch.min(ratio * adv_mb, torch.clamp(ratio, 1 - cfg.clip, 1 + cfg.clip) * adv_mb)
+                    loss_pi = -surr.mean() - (cfg.ent_coefs or {}).get(a, cfg.ent_coef) * d.entropy().mean()
+                    a_opt[a].zero_grad(); loss_pi.backward()
+                    nn.utils.clip_grad_norm_(actors[a].parameters(), cfg.max_grad_norm); a_opt[a].step()
+        if callback and cfg.callback_every and steps >= next_callback:
+            callback(steps, actors)
+            next_callback += cfg.callback_every
+    return actors, {a: critics[value_of[a]] for a in controlled}, history
 
 
 def policies_from_actors(actors: Dict[str, Actor]) -> Dict[str, FixedPolicy]:
     return {a: (lambda obs, env, _m=m, _a=a: _m.act(obs[_a])) for a, m in actors.items()}
+
+
+def save_actor(actor: Actor, path, **meta) -> None:
+    """Checkpoint with the shapes needed to rebuild the actor (plus free-form metadata)."""
+    net = actor.net
+    torch.save({"state_dict": actor.state_dict(), "obs_dim": net[0].in_features, "n_actions": int(np.prod(actor.factors)),
+                "factors": list(actor.factors), "hidden": net[0].out_features, **meta}, path)
+
+
+def load_actor(path) -> Actor:
+    """Load a checkpoint written by `save_actor` (or a bare state_dict of a single-softmax actor)."""
+    ckpt = torch.load(path, map_location="cpu")
+    sd = ckpt.get("state_dict", ckpt)
+    w0, wl = sd["net.0.weight"], sd["net.4.weight"]
+    factors = ckpt.get("factors") or [wl.shape[0]]
+    actor = Actor(w0.shape[1], int(np.prod(factors)), w0.shape[0], factors)
+    actor.load_state_dict(sd); actor.eval()
+    return actor
