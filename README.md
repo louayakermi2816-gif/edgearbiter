@@ -25,7 +25,8 @@ only** (no hardware):
    and on three and five devices sharing one edge.
 4. **The IoT loop** — a **FastAPI** policy service, **MQTT** and a **Node-RED**
    board, fed by a **virtual ESP32 node** (Python, same protocol as the firmware);
-   the Arduino firmware itself runs in the **Wokwi** ESP32 simulator.
+   the Arduino firmware comes with a project for the **Wokwi** ESP32 simulator
+   (not run yet, see Status).
 
 ```
 Imagenette ─finetune.py─▶ MobileNetV3-S/L, ResNet-18 ─quantize.py─▶ FP32 + INT8
