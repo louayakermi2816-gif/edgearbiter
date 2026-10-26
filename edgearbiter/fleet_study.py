@@ -7,7 +7,8 @@ Questions, on the measured cost table with the energy-constrained per-device bud
     - does joint training improve on the single-device policy when the devices start from it?
       (`*_warm`: devices behaviour-cloned from the single-device PPO actors, then trained jointly;
       `*_ft`: the same, with critic-only updates first, so the critics learn the transferred policy's
-      values before it moves)
+      values before it moves; `*_ftla`: the same around the link-aware edge rule instead of the
+      threshold rule - the edge starts from it, or stays on it when it does not learn)
 Same protocol as `experiments.py`: validation episodes for learning curves, model selection and the
 best static configuration; held-out test episodes for the tables, paired against the best static policy.
 """
@@ -36,14 +37,26 @@ BASES = {   # base algorithm -> (the edge learns, centralised critic); the devic
 BASE_LABELS = {"ippo_devices": "IPPO, devices (edge rule)", "mappo_devices": "MAPPO, devices (edge rule)",
                "ippo": "IPPO, devices + edge", "mappo": "MAPPO, devices + edge"}
 COLORS = {"ippo_devices": 0, "mappo_devices": 1, "ippo": 2, "mappo": 3}      # a series' colour follows its base
-RECIPES = {   # name suffix -> (how the devices start: figure panel, from the single-device actors, trainer overrides)
-    "": ("devices from scratch", False, {}),
-    "_warm": ("devices from the single-device actors", True, {}),
-    "_ft": ("from the single-device actors, critics warmed up first", True, {"critic_warmup_steps": 100_000}),
+EDGE_RULES = {"threshold": fleet_edge_rule, "link-aware": link_aware_edge_rule}
+RECIPES = {   # name suffix -> (figure panel, devices from the single-device actors, edge rule: the learned edge's
+              #                 warm start or the fixed edge, trainer overrides)
+    "": ("devices from scratch", False, "threshold", {}),
+    "_warm": ("devices from the single-device actors", True, "threshold", {}),
+    "_ft": ("from the single-device actors, critics warmed up first", True, "threshold", {"critic_warmup_steps": 100_000}),
+    "_ftla": ("from the single-device actors and the link-aware edge, critics warmed up first", True, "link-aware",
+              {"critic_warmup_steps": 100_000}),
 }
-RECIPE_LABELS = {"": "", "_warm": ", from single-device actors", "_ft": ", from single-device actors, critic warm-up"}
+RECIPE_LABELS = {"": "", "_warm": ", from single-device actors", "_ft": ", from single-device actors, critic warm-up",
+                 "_ftla": ", from single-device actors and the link-aware rule, critic warm-up"}
 ALGOS = {b + r: (b, r) for r in RECIPES for b in BASES}
-LABELS = {a: BASE_LABELS[b] + RECIPE_LABELS[r] for a, (b, r) in ALGOS.items()}
+LABELS = {a: (BASE_LABELS[b] + RECIPE_LABELS[r] if BASES[b][0] or RECIPES[r][2] == "threshold"   # learned edge
+              else BASE_LABELS[b].replace("(edge rule)", f"({RECIPES[r][2]} edge)") + RECIPE_LABELS[r.replace("la", "")])
+          for a, (b, r) in ALGOS.items()}
+
+
+def edge_rule_of(algo: str):
+    """The fixed edge of an algo whose edge does not learn, or the rule its learned edge starts from."""
+    return EDGE_RULES[RECIPES[ALGOS[algo][1]][2]]
 SCENARIO = "energy_constrained"
 
 
@@ -79,9 +92,10 @@ def train_fleet_run(job: dict) -> dict:
     costs, cfg = CostTable.load(job.get("cost_table")), SimConfig(**job["sim"])
     env = FleetEnv(costs, cfg, job.get("profiles", PROFILES))
     base, recipe = ALGOS[algo]
-    (learn_edge, central), (_, warm, overrides) = BASES[base], RECIPES[recipe]
+    (learn_edge, central), (_, warm, _, overrides) = BASES[base], RECIPES[recipe]
+    edge_rule = edge_rule_of(algo)
     controlled = env.devices + (["edge"] if learn_edge else [])
-    teachers = {"edge": fleet_edge_rule} if learn_edge else {}
+    teachers = {"edge": edge_rule} if learn_edge else {}
     if warm:                                   # every device starts as the single-device PPO actor of the same seed
         actor = _single_device_actor(Path(job["out_dir"]), Path(job["models_dir"]), seed, costs, cfg)
         teachers.update({d: (lambda obs, e, _d=d: actor.act(obs[_d])) for d in env.devices})
@@ -92,7 +106,7 @@ def train_fleet_run(job: dict) -> dict:
     def on_eval(steps, actors):
         pol = policies_from_actors(actors)
         if not learn_edge:
-            pol["edge"] = fleet_edge_rule
+            pol["edge"] = edge_rule
         r = evaluate_fleet(pol, costs, cfg, job.get("val_episodes", 10), VAL_SEED0, env.profiles)
         curve.append({"steps": steps, "seconds": round(time.time() - t0, 1), **{k: float(v.mean()) for k, v in r.items()}})
         if curve[-1]["return"] > best["return"]:
@@ -100,7 +114,7 @@ def train_fleet_run(job: dict) -> dict:
                         **{"return": curve[-1]["return"]})
 
     actors, _, _ = train_mappo(env, mcfg, controlled=controlled,
-                               fixed_policies=None if learn_edge else {"edge": fleet_edge_rule}, log=None,
+                               fixed_policies=None if learn_edge else {"edge": edge_rule}, log=None,
                                callback=on_eval, init_policies=teachers or None)
     if best["state"] is not None:
         for a, m in actors.items():
@@ -139,7 +153,7 @@ def _learned_policies(out_dir: Path, models_dir: Path, algo: str, seed: int, nam
         raise ValueError(f"{path} was trained on another cost table, scenario or set of devices")
     _, paths = fleet_paths(out_dir, models_dir, algo, seed, name, info["agents"])
     pol = policies_from_actors({a: load_actor(p) for a, p in paths.items()})
-    return pol if "edge" in pol else {**pol, "edge": fleet_edge_rule}
+    return pol if "edge" in pol else {**pol, "edge": edge_rule_of(algo)}
 
 
 def _single_device_actor(out_dir: Path, models_dir: Path, seed: int, costs: CostTable, cfg: SimConfig):
