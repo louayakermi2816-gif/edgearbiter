@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import copy
 import warnings
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 
@@ -112,8 +112,46 @@ def quantize_ptq(model: torch.nn.Module, calib_loader, backend: Optional[str] = 
     return quantized.eval()
 
 
+def quantize_qat(model: torch.nn.Module, train_loader, backend: Optional[str] = None, epochs: int = 2, lr: float = 1e-4,
+                 img: int = 128, max_batches: Optional[int] = None, log: Optional[Callable] = print) -> torch.nn.Module:
+    """INT8 copy of `model` by quantisation-aware training (FX graph mode): a fake-quantised copy is fine-tuned
+    on `train_loader` (AdamW; in the last epoch the batch-norm statistics and the activation ranges are frozen),
+    then converted to the same INT8 kernels as `quantize_ptq`. For networks that post-training quantisation
+    breaks, such as the ImageNet-initialised MobileNetV3s; torchvision trains its INT8 MobileNetV3 the same way."""
+    from torch.ao.nn.intrinsic.qat import freeze_bn_stats
+    from torch.ao.quantization import disable_observer, get_default_qat_qconfig_mapping
+    from torch.ao.quantization.quantize_fx import convert_fx, prepare_qat_fx
+
+    engine = set_quant_engine(backend)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*(deprecated|quantized tensor creation functions)")
+        prepared = prepare_qat_fx(copy.deepcopy(model).train(), get_default_qat_qconfig_mapping(engine),
+                                  (torch.rand(1, 3, img, img),))
+        opt = torch.optim.AdamW(prepared.parameters(), lr=lr, weight_decay=1e-4)
+        loss_fn = torch.nn.CrossEntropyLoss()
+        for epoch in range(epochs):
+            if epoch == epochs - 1 and epochs > 1:            # settle: fixed BN statistics and quantisation ranges
+                prepared.apply(freeze_bn_stats)
+                prepared.apply(disable_observer)
+            prepared.train()
+            total = 0.0
+            for b, (x, y) in enumerate(train_loader):
+                loss = loss_fn(prepared(x), y)
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+                total += float(loss)
+                if max_batches and b + 1 >= max_batches:
+                    break
+            if log:
+                log(f"    QAT epoch {epoch + 1}/{epochs}: train loss {total / (b + 1):.3f}")
+        quantized = convert_fx(prepared.eval())
+    quantized.quant_engine = engine
+    return quantized.eval()
+
+
 def load_quantized(model: torch.nn.Module, state_path, backend: Optional[str] = None, img: int = 128) -> torch.nn.Module:
-    """INT8 model from a saved `quantize_ptq` state: FX graph modules do not pickle, so the INT8 graph is
+    """INT8 model from a saved `quantize_ptq` or `quantize_qat` state: FX graph modules do not pickle, so the INT8 graph is
     rebuilt (uncalibrated) from the FP32 `model` and the calibrated weights and scales are loaded into it."""
     quantized = quantize_ptq(model, [(torch.rand(1, 3, img, img), None)], backend=backend, batches=1, img=img, fast=True)
     quantized.load_state_dict(torch.load(state_path, weights_only=False))

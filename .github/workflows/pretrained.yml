@@ -1,6 +1,7 @@
 name: pretrained
 
-# The runs that need pretrained weights and COCO: fine-tuning the Imagenette models from ImageNet weights,
+# The runs that need pretrained weights and COCO: fine-tuning the Imagenette models from ImageNet weights
+# (then INT8 by post-training quantisation and by quantisation-aware training),
 # the Imagenette top-1 of torchvision's pretrained zoo, and the SSDLite detector's COCO val2017 mAP (FP32 and
 # post-training INT8). Latencies measured here are a GitHub-hosted runner's, not the emulated device's.
 # Each job uploads its results as an artifact and prints them at the end of its log.
@@ -29,10 +30,11 @@ jobs:
           pip install -e .
       - name: Fine-tune from ImageNet weights (5 epochs, 128 px)
         run: python scripts/finetune_imagenette.py --arch ${{ matrix.arch }} --epochs 5 --workers 2 --threads 4
-      - name: FP32 and post-training INT8 top-1 on Imagenette
+      - name: FP32, post-training INT8 and quantisation-aware-trained INT8 top-1 on Imagenette
         run: >
           python scripts/run_benchmark.py --role edge --threads 4 --iters 50 --label "GitHub-hosted runner"
-          --models ${{ matrix.arch }}_imagenette ${{ matrix.arch }}_imagenette_int8 --tag finetuned_${{ matrix.arch }}
+          --models ${{ matrix.arch }}_imagenette ${{ matrix.arch }}_imagenette_int8 ${{ matrix.arch }}_imagenette_int8qat
+          --tag finetuned_${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: finetune-${{ matrix.arch }}

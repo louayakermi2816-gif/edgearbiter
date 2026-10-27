@@ -20,7 +20,8 @@ Models
                        architectures without download (latency / size / memory are valid, accuracy is not).
     Imagenette models  <arch>_imagenette[_scratch] trained by `edgearbiter.finetune`, and their
                        `_int8` variants: post-training static quantisation (FX graph mode, x86
-                       engine) calibrated on Imagenette training images (`edgearbiter.quantize`).
+                       engine) calibrated on Imagenette training images (`edgearbiter.quantize`);
+                       `_int8qat`: quantisation-aware training instead (2 epochs, same INT8 kernels).
 
 Hardware profiles (no device needed): the "edge" is this machine (each model at its fastest
 measured thread count); the "device" is emulated by one thread in a CPU-bandwidth-limited cgroup
@@ -64,14 +65,16 @@ class ModelSpec:
     backend: Optional[str] = None              # quantisation engine of an INT8 model
     imagenet_head: bool = True                 # False: native 10-class Imagenette head (no class mapping)
     ptq: bool = False                          # INT8 by post-training quantisation of `build(...)`'s model
+    qat: bool = False                          # ... by quantisation-aware training instead (with `ptq`)
 
 
 def _weights(enum, pretrained: bool):
     return enum.DEFAULT if pretrained else None
 
 
-def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_small", int8: bool = False) -> ModelSpec:
-    """A model trained by `edgearbiter.finetune` (10-class head, its own input size), FP32 or INT8."""
+def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_small", int8: bool = False,
+                      qat: bool = False) -> ModelSpec:
+    """A model trained by `edgearbiter.finetune` (10-class head, its own input size), FP32 or INT8 (PTQ, or QAT)."""
     from .finetune import build_model, checkpoint_path, read_metrics
 
     ckpt = checkpoint_path(models_dir, init, arch)
@@ -84,7 +87,7 @@ def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_smal
                 raise FileNotFoundError(f"{ckpt} not found: run scripts/finetune_imagenette.py --arch {arch} first")
             model.load_state_dict(torch.load(ckpt, map_location="cpu"))
         return model
-    return ModelSpec(build, img=img, imagenet_head=False, ptq=int8, backend="x86" if int8 else None)
+    return ModelSpec(build, img=img, imagenet_head=False, ptq=int8, qat=qat, backend="x86" if int8 else None)
 
 
 def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
@@ -117,6 +120,7 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
         for init, suffix in (("imagenet", ""), ("scratch", "_scratch")):
             zoo[f"{arch}_imagenette{suffix}"] = _imagenette_model(models_dir, init, arch)
             zoo[f"{arch}_imagenette{suffix}_int8"] = _imagenette_model(models_dir, init, arch, int8=True)
+            zoo[f"{arch}_imagenette{suffix}_int8qat"] = _imagenette_model(models_dir, init, arch, int8=True, qat=True)
     return zoo
 
 
@@ -203,10 +207,13 @@ def imagenette_accuracy(model: torch.nn.Module, loader, max_batches: Optional[in
 
 
 def imagenette_loader(root: str = "data", img: int = 224, batch_size: int = 32, download: bool = True, split: str = "val",
-                      shuffle: bool = False):
-    """Imagenette loader at the given resolution (evaluation transform); None if the dataset is unavailable."""
+                      shuffle: bool = False, augment: bool = False):
+    """Imagenette loader at the given resolution (evaluation transform, or the training augmentation); None if
+    the dataset is unavailable."""
+    from .data import train_transform
     try:
-        return make_loader(imagenette(root, split, img=img, download=download, transform=eval_transform(img)),
+        return make_loader(imagenette(root, split, img=img, download=download,
+                                      transform=train_transform(img) if augment else eval_transform(img)),
                            batch_size=batch_size, shuffle=shuffle)
     except Exception as exc:
         print(f"[benchmark] Imagenette unavailable ({exc}); accuracy will be null")
@@ -254,12 +261,14 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
             model = build(spec, pretrained)
             int8_state = None
             if spec.ptq:
-                from .quantize import quantize_ptq
+                from .quantize import quantize_ptq, quantize_qat
                 if not data_root:
-                    raise ValueError(f"{name}: post-training quantisation needs calibration images (data_root)")
-                key = ("train", spec.img)
-                loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True))
-                model = quantize_ptq(model, loaders[key], backend=spec.backend, batches=calib_batches, img=spec.img)
+                    raise ValueError(f"{name}: INT8 quantisation needs calibration / training images (data_root)")
+                key = ("train", spec.img, spec.qat)
+                loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True,
+                                                          batch_size=64 if spec.qat else 32, augment=spec.qat))
+                model = (quantize_qat(model, loaders[key], backend=spec.backend, img=spec.img) if spec.qat else
+                         quantize_ptq(model, loaders[key], backend=spec.backend, batches=calib_batches, img=spec.img))
                 # trained weights: keep the calibrated model for deployment (API /infer); random ones: temporary
                 int8_state = str(int8_state_path(models_dir, name) if pretrained else Path(tmp) / f"{name}.pt")
                 torch.save(model.state_dict(), int8_state)
@@ -276,7 +285,8 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                        "cgroup_procs": limit.procs if limit else None}
                 m = run_worker(job)
                 rows.append({"model": name, "role": role, "int8": spec.backend is not None, "quant_engine": m["quant_engine"],
-                             "quantisation": ("PTQ (FX)" if spec.ptq else "torchvision") if spec.backend else None,
+                             "quantisation": (("QAT (FX)" if spec.qat else "PTQ (FX)") if spec.ptq else "torchvision")
+                             if spec.backend else None,
                              "weights": "random" if not pretrained else label, "img": spec.img, "threads": m["threads"],
                              "cpu_quota": cpu_quota, "latency_ms": m["latency_ms"],
                              "latency_net_ms": m.get("latency_net_ms"), "size_mb": size,
@@ -305,7 +315,8 @@ def markdown_table(rows: List[Dict], host: Optional[Dict] = None) -> str:
               "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         acc = "—" if r["accuracy"] is None else f"{100 * r['accuracy']:.1f}%"
-        q = f"INT8 ({r['quant_engine']}{', PTQ' if r.get('quantisation') == 'PTQ (FX)' else ''})" if r["int8"] else "FP32"
+        method = {"PTQ (FX)": ", PTQ", "QAT (FX)": ", QAT"}.get(r.get("quantisation"), "")
+        q = f"INT8 ({r['quant_engine']}{method})" if r["int8"] else "FP32"
         mem = "—" if r.get("memory_mb") is None else f"{r['memory_mb']:.1f}"
         lines.append(f"| {r['model']} | {q} | {r['img']}px | {r['threads']} | {r['latency_ms']['p50']:.1f} | "
                      f"{r['latency_ms']['p95']:.1f} | {mem} | {r['size_mb']} | {acc} |")
