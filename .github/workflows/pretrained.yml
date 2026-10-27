@@ -97,3 +97,26 @@ jobs:
             results/benchmark_edge_detector_pretrained.*
       - name: Print the results
         run: for f in results/coco_map.json results/benchmark_edge_detector_pretrained.json; do echo "RESULT_FILE $f $(python -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1]))))' $f)"; done
+
+  collect:
+    # Commits the result files (not the checkpoints) to the development branch this run started from; never to main.
+    needs: [finetune, zoo, detector]
+    if: startsWith(github.ref_name, 'claude/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Commit the result files
+        run: |
+          find artifacts -type f \( -name '*.json' -o -name '*.md' \) -not -path '*/models/*' -exec cp {} results/ \;
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Results of the pretrained workflow (run ${{ github.run_id }})"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
