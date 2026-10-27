@@ -40,9 +40,9 @@ def load_run(path: str):
     return (data["rows"], data.get("host")) if isinstance(data, dict) else (data, None)
 
 
-def tier_models(name: str, device_rows):
+def tier_models(name: str, device_rows, init: str = "scratch"):
     if name == "deployment":
-        tiers, reasons = deployment_tiers(device_rows)
+        tiers, reasons = deployment_tiers(device_rows, init=init)
         print("tiers (deployment rule):\n  " + "\n  ".join(reasons))
         return tiers, reasons
     return TIER_SETS[name], f"fixed tier set {name!r}"
@@ -68,6 +68,9 @@ def main():
     ap.add_argument("--tag", default=None, help="suffix of the output files: benchmark_<role>_<tag>.*")
     ap.add_argument("--out", default="results")
     ap.add_argument("--merge", nargs=2, metavar=("DEVICE_JSON", "EDGE_JSON"))
+    ap.add_argument("--init", choices=["scratch", "imagenet"], default="scratch",
+                    help="deployment tiers: the Imagenette models trained from scratch, or fine-tuned from ImageNet")
+    ap.add_argument("--table", default="cost_table.json", help="file name of the cost table written to --out")
     ap.add_argument("--write-table", action="store_true",
                     help="device run without --tag: also rebuild results/cost_table.json from it")
     args = ap.parse_args()
@@ -75,7 +78,7 @@ def main():
 
     if args.merge:
         (dev_rows, dev_host), (edge_rows, edge_host) = load_run(args.merge[0]), load_run(args.merge[1])
-        tiers, selection = tier_models(args.tiers, dev_rows)
+        tiers, selection = tier_models(args.tiers, dev_rows, args.init)
         table = build_cost_table(dev_rows, edge_rows, tiers, meta={
             "device": {"benchmark": args.merge[0], "host": dev_host,
                        "cpu_quota": sorted({r.get("cpu_quota") for r in dev_rows if r.get("cpu_quota")})},
@@ -92,13 +95,13 @@ def main():
         print(md)
         if args.role != "device" or args.tag or not args.write_table:
             return
-        tiers, selection = tier_models(args.tiers, rows)
+        tiers, selection = tier_models(args.tiers, rows, args.init)
         missing = [m for m in tiers.values() if m not in {r["model"] for r in rows}]
         if missing:
             print(f"cost table not built: tier models missing from the run: {missing}"); return
         table = build_cost_table(rows, tiers=tiers, meta={"device": {"host": host}, "tier_selection": selection})
-    (out / "cost_table.json").write_text(json.dumps(table, indent=1), encoding="utf-8")
-    print(f"\ncost table written to {out}/cost_table.json")
+    (out / args.table).write_text(json.dumps(table, indent=1), encoding="utf-8")
+    print(f"\ncost table written to {out}/{args.table}")
 
 
 if __name__ == "__main__":
