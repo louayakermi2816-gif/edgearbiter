@@ -11,10 +11,11 @@ only** (no hardware):
 
 1. **Models and their measured costs** — MobileNetV3-Small/Large and ResNet-18
    trained on Imagenette with a PyTorch pipeline (data loaders, augmentation,
-   evaluation), quantised to INT8 (`torch.ao.quantization`), and benchmarked for
+   evaluation), from scratch and fine-tuned from ImageNet weights, quantised to INT8
+   (`torch.ao.quantization`: post-training and quantisation-aware), and benchmarked for
    top-1 accuracy, p50/p95 latency and memory on an **emulated low-power device**
    (one CPU-throttled core) and on an edge server, together with torchvision's
-   FP32/INT8 zoo and the SSDLite detector (FP32 and INT8). The measurements form the **cost table**
+   FP32/INT8 zoo and the SSDLite detector (FP32 and INT8, COCO mAP). The measurements form the **cost table**
    that drives the simulator.
 2. **An IoT–edge simulator**: bursty workload, Markov wireless link with a
    bandwidth-limited uplink, bounded device queue, energy budget, edge server
@@ -56,7 +57,7 @@ In development since September 2026. Every number below comes from a file in
 | RL study on the synthetic development table | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
 | Multi-device studies: 3 and 5 devices sharing one edge (IPPO / MAPPO, learned edge, transfer, fine-tuning) | done — [3 devices](results/fleet.md), [5 devices](results/fleet5.md) |
 | Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI |
-| Fine-tuning from ImageNet weights; top-1 of the pretrained zoo; detector accuracy (COCO mAP) | fine-tuning code ready; needs download.pytorch.org (weights) and images.cocodataset.org, not reachable from the build environment |
+| Fine-tuning from ImageNet weights, INT8 by PTQ and QAT; top-1 of the pretrained zoo; detector COCO mAP | done on a GitHub-hosted runner (workflow [`pretrained`](.github/workflows/pretrained.yml); the build environment cannot download the weights): fine-tuned 94.4–96.6 % top-1; SSDLite 21.3 mAP in FP32, 19.3 in INT8 — [fine-tuning](#fine-tuned-from-imagenet-weights-and-int8-by-qat), [COCO](results/coco_map.md) |
 | ESP32 firmware (Arduino core 3.3.12, Espressif toolchain) | done — both builds compile (Wi-Fi + MQTT, serial); the serial build runs in Espressif's QEMU and feeds the Node-RED board through a serial ↔ MQTT bridge: 92 / 92 telemetry messages answered, 11 ms median round trip on the broker; build and QEMU boot checked in CI |
 | The firmware on a physical ESP32 or in Wokwi; Docker stack | not run (no hardware; wokwi.com and Docker are not available in the build environment) |
 
@@ -85,8 +86,9 @@ Imagenette (10 ImageNet classes, 160 px release, 9,469 training / 3,925 validati
 random-resized-crop, flip and colour-jitter augmentation, 128 px input, AdamW with a
 one-cycle schedule, label smoothing 0.1, validation every epoch and the best checkpoint
 kept. The ImageNet weights are not downloadable from the build environment, so all three
-are trained **from scratch** (`--from-scratch`); without the flag the same script
-fine-tunes from ImageNet weights.
+are trained **from scratch** here (`--from-scratch`); without the flag the same script
+fine-tunes from ImageNet weights, which a GitHub-hosted runner did: 94.4–96.6 % top-1
+([below](#fine-tuned-from-imagenet-weights-and-int8-by-qat)).
 
 | model | init | epochs | input | best val top-1 | training time |
 |---|---|---|---|---|---|
@@ -136,6 +138,38 @@ Measured 2026-10-23 on an Intel Xeon @ 2.80 GHz VM (4 vCPU), torch 2.14.1, 128 p
 - A quarter of a core makes inference 5–7× slower than an unthrottled thread (the model
   runs in 1.25 ms slices every 5 ms), and p95 is 30–40 % above p50 on the device. The edge
   is 6–11× faster than the device.
+
+### Fine-tuned from ImageNet weights, and INT8 by QAT
+
+The build environment cannot download the ImageNet weights, so the workflow
+[`pretrained`](.github/workflows/pretrained.yml) runs these steps on a GitHub-hosted runner
+(4 vCPU; [run log](https://github.com/louayakermi2816-gif/edgearbiter/actions/runs/40595469713), result files committed by the workflow). The same script without
+`--from-scratch` fine-tunes each model for 5 epochs at 128 px. INT8 comes from the
+post-training quantisation above, or from **quantisation-aware training**
+(`quantize.quantize_qat`: 2 epochs on the augmented training split, AdamW 1e-4, batch-norm
+statistics and activation ranges frozen in the second epoch, then the same INT8 kernels).
+
+| model | from scratch (20 epochs) | fine-tuned (5 epochs) | INT8, post-training | INT8, quantisation-aware | runner p50, FP32 → INT8 (QAT) |
+|---|---|---|---|---|---|
+| MobileNetV3-Small | 82.6 % | **94.5 %** (5 min) | 16.3 % | 79.5 % | 3.7 → 3.1 ms |
+| MobileNetV3-Large | 83.9 % | **96.6 %** (10 min) | 62.1 % | 89.3 % | 7.3 → 3.7 ms |
+| ResNet-18 | 86.7 % | **94.4 %** (11 min) | 94.5 % | 91.5 % | 8.9 → 1.1 ms |
+
+- **ImageNet features add 7.7 to 12.6 points** in a quarter of the epochs:
+  94.4–96.6 % top-1 on Imagenette.
+- **Post-training INT8 keeps ResNet-18 (94.5 %) but breaks the fine-tuned MobileNetV3s**
+  (16.3 % and 62.1 %), although it cost at most 0.3 points on the same
+  architectures trained from scratch. The MobileNetV3-Large result also depends on the
+  calibration images: 85.4 % in an [earlier run](https://github.com/louayakermi2816-gif/edgearbiter/actions/runs/40590660359) of the same workflow. torchvision's own
+  INT8 MobileNetV3-Large is produced by QAT (99.8 % on Imagenette, below).
+- **Two epochs of QAT recover most of it, not all**: 79.5 % and 89.3 %,
+  15.0 and 7.2 points below FP32. On ResNet-18, where
+  post-training INT8 is already lossless, they cost 2.9 points. A longer schedule
+  (torchvision's INT8 MobileNetV3-Large is trained on all of ImageNet) or keeping the sensitive
+  layers in FP32 is the next step; by the deployment rule (at most 1 point lost) the MobileNetV3s would stay in FP32.
+- The cost table and the studies keep the models trained from scratch, measured on the
+  emulated device; `scripts/run_benchmark.py --init imagenet` builds a table from the
+  fine-tuned ones once they are benchmarked on the device.
 
 ### torchvision zoo, including the SSDLite detector
 
@@ -188,6 +222,32 @@ whole detector (with box decoding and NMS):
   (qnnpack), is slower than its FP32 parent on this x86 host, while INT8 ResNet-18 is 3.3×
   faster than FP32 ResNet-18; at 224 px MobileNetV3-Small stays the fastest classifier on the
   device.
+
+**With the pretrained weights** (workflow `pretrained`, the same runner): torchvision's
+classifiers score 99.0–99.8 % top-1 on Imagenette with their ImageNet heads restricted to
+the 10 classes, INT8 included ([results](results/benchmark_edge_zoo_pretrained.md)) — these
+classes are easy for networks trained on all of ImageNet.
+
+| model | precision | top-1 (Imagenette, 10 classes) |
+|---|---|---|
+| mobilenet_v3_small | FP32 | 99.1 % |
+| mobilenet_v3_large | FP32 | 99.5 % |
+| mobilenet_v3_large_int8 | INT8 (qnnpack) | 99.8 % |
+| resnet18 | FP32 | 99.0 % |
+| resnet18_int8 | INT8 (fbgemm) | 99.0 % |
+| efficientnet_b0 | FP32 | 99.8 % |
+
+SSDLite with its COCO weights scores **21.3 mAP on COCO val2017** (all 5,000 images,
+`scripts/eval_coco.py`), torchvision's reference value, and **19.3 after post-training
+INT8** (calibrated on 512 Imagenette images): 2.0 points for a backbone + heads
+1.9× faster and a whole detector 1.5× faster on the runner (4 threads). With
+real weights box decoding and NMS still take about half of the FP32 detector's time
+([results](results/coco_map.md), [latency](results/benchmark_edge_detector_pretrained.md)).
+
+| SSDLite320-MobileNetV3-Large | mAP@[.5:.95] | mAP@.5 | mAP@.75 | runner p50: backbone + heads | runner p50: whole detector | weights |
+|---|---|---|---|---|---|---|
+| FP32 | **21.3** | 34.3 | 22.1 | 30.7 ms | 60.5 ms | 14.1 MB |
+| INT8 (x86, PTQ) | **19.3** | 31.6 | 20.1 | 15.9 ms | 40.9 ms | 4.1 MB |
 
 ### From measurements to the cost table
 
@@ -647,6 +707,13 @@ python scripts/run_fleet.py --profiles near mid far near mid --name fleet5 \
 # 4. firmware: both builds, then the serial build in Espressif's QEMU (qemu-system-xtensa on PATH)
 firmware/esp32/build.sh mqtt && firmware/esp32/build.sh serial
 python scripts/run_qemu_node.py --check
+# 5. pretrained weights and COCO (the workflow `pretrained` runs these on a GitHub runner)
+python scripts/finetune_imagenette.py --arch mobilenet_v3_small --epochs 5
+python scripts/run_benchmark.py --role edge --tag finetuned_mobilenet_v3_small \
+    --models mobilenet_v3_small_imagenette mobilenet_v3_small_imagenette_int8 mobilenet_v3_small_imagenette_int8qat
+python scripts/run_benchmark.py --role edge --weights pretrained --tag detector_pretrained \
+    --models ssdlite320_mobilenet_v3_large ssdlite320_mobilenet_v3_large_int8
+python scripts/eval_coco.py                  # COCO val2017 box mAP, FP32 and INT8
 ```
 
 ## Layout
@@ -654,7 +721,8 @@ python scripts/run_qemu_node.py --check
 ```
 edgearbiter/data.py           Imagenette loaders, augmentation, shared preprocessing
 edgearbiter/finetune.py       training on Imagenette (MobileNetV3-Small/Large, ResNet-18; ImageNet init or scratch)
-edgearbiter/quantize.py       post-training static INT8 quantisation (FX): classifiers, SSDLite backbone + heads; restore
+edgearbiter/quantize.py       INT8 (FX): post-training and quantisation-aware; SSDLite backbone + heads; restore
+edgearbiter/coco_eval.py      COCO val2017 box mAP of a detector (FP32 or INT8)
 edgearbiter/benchmark.py      accuracy / latency / memory benchmark, model zoo, deployment tiers, cost-table builder
 edgearbiter/bench_worker.py   one model measured in a fresh process (latency, p95, memory)
 edgearbiter/cpulimit.py       emulated device: CPU-bandwidth-limited cgroup
@@ -677,7 +745,8 @@ firmware/esp32/edge_node/     ESP32 telemetry + decision node (Arduino) and its 
 firmware/esp32/build.sh       arduino-cli build: Wi-Fi + MQTT, or serial transport
 node-red/flows.json           control loop (telemetry -> /policy/decide -> decision) and the board
 scripts/                      finetune_imagenette, run_benchmark, run_baselines, run_experiments,
-                              run_fleet, train_single_agent, train_marl, inspect_policy, run_qemu_node
+                              run_fleet, train_single_agent, train_marl, inspect_policy, run_qemu_node,
+                              eval_coco
 tests/                        simulator, fleet, agents, benchmark, training loop, experiments, API, MQTT loop, serial bridge
 ```
 
@@ -688,10 +757,13 @@ tests/                        simulator, fleet, agents, benchmark, training loop
   differently — on the target hardware, re-run the device benchmark and the merge.
 - **Energy** per inference is derived from latency (0.45 mJ per ms of inference), not
   measured with a power meter.
-- The models are trained **from scratch** (the ImageNet weights could not be downloaded);
-  fine-tuned models would be more accurate. The detector (FP32 and INT8) is benchmarked for
-  latency and memory only, with random weights: its accuracy (COCO mAP) needs the COCO weights
-  and validation images.
+- The cost table and the studies use the models trained **from scratch** (82.6–86.7 %):
+  the fine-tuned ones (94.4–96.6 %) were trained and measured on a GitHub runner, because the
+  build environment cannot download the ImageNet weights, and were neither benchmarked on the
+  emulated device nor used in the studies. Likewise the detector's COCO mAP and real-weight
+  latency come from the runner; on the emulated device it is measured with random weights.
+- Quantisation-aware training uses a short schedule (2 epochs): it does not bring the
+  fine-tuned MobileNetV3s back to their FP32 accuracy.
 - Absolute latencies depend on the host's day: the zoo, measured three days after the
   Imagenette models, ran 1.8–2.8× faster on the same VM type. Rankings held; compare within a
   table.
