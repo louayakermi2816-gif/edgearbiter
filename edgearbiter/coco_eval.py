@@ -32,9 +32,18 @@ def coco_val(root: str = "data/coco", download: bool = True, log: Optional[Calla
         root_path.mkdir(parents=True, exist_ok=True)
         archive = root_path / Path(url).name
         if not archive.exists():
-            if log:
-                log(f"[coco] downloading {url}")
-            urllib.request.urlretrieve(url, archive)
+            for attempt in (url, url.replace("https://", "http://")):    # the official links are http
+                if log:
+                    log(f"[coco] downloading {attempt}")
+                try:
+                    urllib.request.urlretrieve(attempt, archive)
+                    break
+                except OSError as exc:
+                    archive.unlink(missing_ok=True)
+                    if attempt.startswith("http://"):
+                        raise
+                    if log:
+                        log(f"[coco] {exc}; trying http")
         with zipfile.ZipFile(archive) as z:
             z.extractall(root_path, members=members)
         archive.unlink()
