@@ -1,0 +1,45 @@
+name: firmware
+
+# The ESP32 node: build both transports with the Espressif toolchain (Arduino core 3.3.12), then boot the
+# serial build in Espressif's QEMU and check that it publishes telemetry and applies a decision.
+on:
+  push:
+  pull_request:
+
+env:
+  ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  QEMU_URL: https://github.com/espressif/qemu/releases/download/esp-develop-9.2.2-20260417/qemu-xtensa-softmmu-esp_develop_9.2.2_20260417-x86_64-linux-gnu.tar.xz
+
+jobs:
+  esp32:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Cache the ESP32 core and tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15/packages
+          key: arduino-esp32-3.3.12
+      - name: ESP32 core and libraries
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12
+          arduino-cli lib install PubSubClient@2.8 ArduinoJson@7.4.3
+      - name: Build (Wi-Fi + MQTT, and serial for QEMU)
+        run: |
+          firmware/esp32/build.sh mqtt
+          firmware/esp32/build.sh serial
+      - name: Espressif QEMU
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libslirp0 libsdl2-2.0-0 libgcrypt20 libpixman-1-0
+          curl -sSL -o "$RUNNER_TEMP/qemu.tar.xz" "$QEMU_URL" && tar xJf "$RUNNER_TEMP/qemu.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/qemu/bin" >> "$GITHUB_PATH"
+      - name: Boot the firmware in QEMU and apply a decision
+        run: |
+          pip install numpy gymnasium
+          python scripts/run_qemu_node.py --check --verbose

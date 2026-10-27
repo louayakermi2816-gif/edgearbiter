@@ -452,7 +452,7 @@
   "z": "ea_tab",
   "name": "split outcome",
   "outputs": 10,
-  "func": "const o = msg.payload, k = o.kpis;\nconst tierNames = ['tiny', 'small', 'medium'];\nreturn [\n  {payload: Math.round(100 * o.battery)},\n  {payload: Math.round(100 * o.edge_load)},\n  {payload: `${(100 * k.mean_accuracy).toFixed(1)} %`},\n  {payload: `${(100 * k.violation_rate).toFixed(1)} %`},\n  {payload: `${k.energy_j.toFixed(1)} J`},\n  {payload: `${k.offloaded} offloaded / ${k.processed} processed`},\n  {payload: `${o.loop_rtt_ms} ms`},\n  o.processed ? [{topic: 'latency', payload: o.latency_ms}, {topic: 'deadline', payload: 100}] : null,\n  {topic: 'model tier', payload: o.tier},\n  {payload: `episode ${o.episode}, t = ${o.t} s, return ${k.return}`}\n];",
+  "func": "// from the virtual node (simulator: every KPI) or the ESP32 firmware (what a device can count itself)\nconst o = msg.payload, k = o.kpis || {};\nconst pct = v => v == null ? '—' : `${(100 * v).toFixed(1)} %`;\nreturn [\n  o.battery == null ? null : {payload: Math.round(100 * o.battery)},\n  {payload: Math.round(100 * (o.edge_load ?? flow.get('edge_load') ?? 0.3))},   // the load the policy was given\n  {payload: pct(k.mean_accuracy)},\n  {payload: pct(k.violation_rate)},\n  {payload: k.energy_j == null ? '—' : `${k.energy_j.toFixed(1)} J`},\n  {payload: `${k.offloaded} offloaded / ${k.processed} processed`},\n  {payload: `${o.loop_rtt_ms} ms`},\n  o.processed && o.latency_ms != null ? [{topic: 'latency', payload: o.latency_ms}, {topic: 'deadline', payload: 100}] : null,\n  {topic: 'model tier', payload: o.tier},\n  {payload: o.episode == null ? `${o.node}, t = ${o.t} s` : `episode ${o.episode}, t = ${o.t} s, return ${k.return}`}\n];",
   "initialize": "",
   "finalize": "",
   "libs": [],
