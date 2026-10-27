@@ -1,0 +1,83 @@
+{
+ "host": {
+  "label": "GitHub-hosted runner",
+  "cpu": "AMD EPYC 9V45 96-Core Processor",
+  "logical_cpus": 4,
+  "os": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.43",
+  "python": "3.13.17",
+  "torch": "2.14.1+cpu",
+  "torchvision": "0.29.1+cpu",
+  "date_utc": "2026-10-27T22:42:34Z"
+ },
+ "rows": [
+  {
+   "model": "resnet18_imagenette",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "trained",
+   "img": 128,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 8.862299499980963,
+    "p95": 9.002154099982818,
+    "mean": 8.875885160002781
+   },
+   "latency_net_ms": null,
+   "size_mb": 44.8,
+   "memory_mb": 56.4,
+   "inference_mem_mb": 11.6,
+   "rss_peak_mb": 521.2,
+   "accuracy": 0.9444585987261146,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "resnet18_imagenette_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "trained",
+   "img": 128,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 1.1815004999675693,
+    "p95": 1.20604950001848,
+    "mean": 1.1828337999963878
+   },
+   "latency_net_ms": null,
+   "size_mb": 11.31,
+   "memory_mb": 26.1,
+   "inference_mem_mb": 14.8,
+   "rss_peak_mb": 558.1,
+   "accuracy": 0.9447133757961783,
+   "accuracy_metric": "imagenette_10way_top1"
+  },
+  {
+   "model": "resnet18_imagenette_int8qat",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "QAT (FX)",
+   "weights": "trained",
+   "img": 128,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 1.1406440002019735,
+    "p95": 1.15638305005632,
+    "mean": 1.1424918000238904
+   },
+   "latency_net_ms": null,
+   "size_mb": 11.31,
+   "memory_mb": 25.7,
+   "inference_mem_mb": 14.4,
+   "rss_peak_mb": 557.7,
+   "accuracy": 0.9154140127388535,
+   "accuracy_metric": "imagenette_10way_top1"
+  }
+ ]
+}

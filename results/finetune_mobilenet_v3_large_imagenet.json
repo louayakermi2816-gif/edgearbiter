@@ -1,0 +1,54 @@
+{
+ "init": "imagenet",
+ "best_val_top1": 0.9656050955414013,
+ "train_seconds": 616.1,
+ "history": [
+  {
+   "epoch": 1,
+   "train_loss": 1.1027252896557969,
+   "val_top1": 0.9401273885350319,
+   "seconds": 123.8
+  },
+  {
+   "epoch": 2,
+   "train_loss": 0.6718529819283973,
+   "val_top1": 0.9126114649681528,
+   "seconds": 122.3
+  },
+  {
+   "epoch": 3,
+   "train_loss": 0.6147861476432486,
+   "val_top1": 0.9426751592356688,
+   "seconds": 124.4
+  },
+  {
+   "epoch": 4,
+   "train_loss": 0.5633916659218694,
+   "val_top1": 0.9648407643312102,
+   "seconds": 122.8
+  },
+  {
+   "epoch": 5,
+   "train_loss": 0.535258224677959,
+   "val_top1": 0.9656050955414013,
+   "seconds": 122.7
+  }
+ ],
+ "config": {
+  "arch": "mobilenet_v3_large",
+  "data_root": "data",
+  "size": "160px",
+  "epochs": 5,
+  "batch_size": 64,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "img": 128,
+  "num_workers": 2,
+  "freeze_features": false,
+  "pretrained": true,
+  "threads": 4,
+  "seed": 0,
+  "out_dir": "models",
+  "max_batches": null
+ }
+}
