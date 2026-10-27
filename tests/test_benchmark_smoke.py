@@ -64,6 +64,23 @@ def test_post_training_int8_keeps_predictions_and_restores_from_state():
     assert torch.equal(fresh(x), q(x))
 
 
+def test_quantisation_aware_training_gives_the_same_int8_graph_as_ptq():
+    import io
+    from edgearbiter.finetune import build_model
+    from edgearbiter.quantize import quantize_ptq, quantize_qat
+    torch.manual_seed(0)
+    model = build_model(pretrained=False, arch="mobilenet_v3_small").eval()
+    batches = [(torch.rand(4, 3, 64, 64), torch.randint(0, 10, (4,))) for _ in range(2)]
+    q = quantize_qat(model, batches, backend="x86", epochs=2, img=64, log=None)
+    x = torch.rand(2, 3, 64, 64)
+    assert q(x).shape == (2, 10) and state_dict_size_mb(q) < state_dict_size_mb(model) / 3
+    buf = io.BytesIO(); torch.save(q.state_dict(), buf); buf.seek(0)
+    deployed = quantize_ptq(build_model(pretrained=False, arch="mobilenet_v3_small").eval(), [(torch.rand(1, 3, 64, 64), None)],
+                            backend="x86", batches=1, img=64, fast=True)
+    deployed.load_state_dict(torch.load(buf, weights_only=False))     # what load_quantized does for a saved QAT model
+    assert torch.equal(deployed(x), q(x))
+
+
 def test_post_training_int8_detector_keeps_the_detection_interface_and_restores_from_state():
     import io
     import torchvision.models as tvm

@@ -1,0 +1,68 @@
+{
+ "host": {
+  "label": "GitHub-hosted runner",
+  "cpu": "AMD EPYC 7763 64-Core Processor",
+  "logical_cpus": 4,
+  "os": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.43",
+  "python": "3.13.16",
+  "torch": "2.14.1+cpu",
+  "torchvision": "0.29.1+cpu",
+  "date_utc": "2026-10-27T22:32:11Z"
+ },
+ "rows": [
+  {
+   "model": "ssdlite320_mobilenet_v3_large",
+   "role": "edge",
+   "int8": false,
+   "quant_engine": null,
+   "quantisation": null,
+   "weights": "pretrained",
+   "img": 320,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 60.50146400000145,
+    "p95": 66.71104540000064,
+    "mean": 62.636981059999925
+   },
+   "latency_net_ms": {
+    "p50": 30.720391000002678,
+    "p95": 34.880251900001,
+    "mean": 31.47790154000063
+   },
+   "size_mb": 14.06,
+   "memory_mb": 59.4,
+   "inference_mem_mb": 45.4,
+   "rss_peak_mb": 532.4,
+   "accuracy": null,
+   "accuracy_metric": null
+  },
+  {
+   "model": "ssdlite320_mobilenet_v3_large_int8",
+   "role": "edge",
+   "int8": true,
+   "quant_engine": "x86",
+   "quantisation": "PTQ (FX)",
+   "weights": "pretrained",
+   "img": 320,
+   "threads": 4,
+   "cpu_quota": null,
+   "latency_ms": {
+    "p50": 40.881913000006875,
+    "p95": 41.59859450000596,
+    "mean": 40.991532399998505
+   },
+   "latency_net_ms": {
+    "p50": 15.882743999995341,
+    "p95": 16.186745299997085,
+    "mean": 15.92925105999825
+   },
+   "size_mb": 4.09,
+   "memory_mb": 28.0,
+   "inference_mem_mb": 23.9,
+   "rss_peak_mb": 540.3,
+   "accuracy": null,
+   "accuracy_metric": null
+  }
+ ]
+}

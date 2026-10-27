@@ -1,0 +1,122 @@
+name: pretrained
+
+# The runs that need pretrained weights and COCO: fine-tuning the Imagenette models from ImageNet weights
+# (then INT8 by post-training quantisation and by quantisation-aware training),
+# the Imagenette top-1 of torchvision's pretrained zoo, and the SSDLite detector's COCO val2017 mAP (FP32 and
+# post-training INT8). Latencies measured here are a GitHub-hosted runner's, not the emulated device's.
+# Each job uploads its results as an artifact and prints them at the end of its log.
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/pretrained.yml"]
+
+jobs:
+  finetune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [mobilenet_v3_small, mobilenet_v3_large, resnet18]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (CPU-only PyTorch)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install -e .
+      - name: Fine-tune from ImageNet weights (5 epochs, 128 px)
+        run: python scripts/finetune_imagenette.py --arch ${{ matrix.arch }} --epochs 5 --workers 2 --threads 4
+      - name: FP32, post-training INT8 and quantisation-aware-trained INT8 top-1 on Imagenette
+        run: >
+          python scripts/run_benchmark.py --role edge --threads 4 --iters 50 --label "GitHub-hosted runner"
+          --models ${{ matrix.arch }}_imagenette ${{ matrix.arch }}_imagenette_int8 ${{ matrix.arch }}_imagenette_int8qat
+          --tag finetuned_${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finetune-${{ matrix.arch }}
+          path: |
+            results/finetune_${{ matrix.arch }}_imagenet.*
+            results/benchmark_edge_finetuned_${{ matrix.arch }}.*
+            models/${{ matrix.arch }}_imagenette.*
+      - name: Print the results
+        run: for f in results/finetune_${{ matrix.arch }}_imagenet.json results/benchmark_edge_finetuned_${{ matrix.arch }}.json; do echo "RESULT_FILE $f $(python -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1]))))' $f)"; done
+
+  zoo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (CPU-only PyTorch)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install -e .
+      - name: Pretrained zoo, Imagenette top-1 (ImageNet heads restricted to the 10 classes)
+        run: >
+          python scripts/run_benchmark.py --role edge --weights pretrained --threads 4 --iters 30 --label "GitHub-hosted runner"
+          --models mobilenet_v3_small mobilenet_v3_large mobilenet_v3_large_int8 resnet18 resnet18_int8 efficientnet_b0
+          --tag zoo_pretrained
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zoo-pretrained
+          path: results/benchmark_edge_zoo_pretrained.*
+      - name: Print the results
+        run: echo "RESULT_FILE results/benchmark_edge_zoo_pretrained.json $(python -c 'import json; print(json.dumps(json.load(open("results/benchmark_edge_zoo_pretrained.json"))))')"
+
+  detector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (CPU-only PyTorch)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install -e ".[coco]"
+      - name: SSDLite with COCO weights, FP32 and INT8 (calibrated on 512 Imagenette images)
+        run: >
+          python scripts/run_benchmark.py --role edge --weights pretrained --threads 4 --iters 50 --label "GitHub-hosted runner"
+          --models ssdlite320_mobilenet_v3_large ssdlite320_mobilenet_v3_large_int8 --tag detector_pretrained
+      - name: COCO val2017 box mAP
+        run: python scripts/eval_coco.py --threads 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: detector-coco
+          path: |
+            results/coco_map.*
+            results/benchmark_edge_detector_pretrained.*
+      - name: Print the results
+        run: for f in results/coco_map.json results/benchmark_edge_detector_pretrained.json; do echo "RESULT_FILE $f $(python -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1]))))' $f)"; done
+
+  collect:
+    # Commits the result files (not the checkpoints) to the development branch this run started from; never to main.
+    needs: [finetune, zoo, detector]
+    if: startsWith(github.ref_name, 'claude/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Commit the result files
+        run: |
+          find artifacts -type f \( -name '*.json' -o -name '*.md' \) -not -path '*/models/*' -exec cp {} results/ \;
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Results of the pretrained workflow (run ${{ github.run_id }})"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
