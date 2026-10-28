@@ -1,0 +1,15 @@
+# Build context of the API / virtual-node image: the package and the cost table only.
+# models/ is mounted at run time (docker-compose.yml); a local .venv or dataset would only slow the build down.
+.git
+.venv
+venv
+data
+models
+docs
+firmware
+node-red
+tests
+scripts
+**/__pycache__
+**/*.pyc
+.pytest_cache

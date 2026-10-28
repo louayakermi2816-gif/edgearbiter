@@ -12,9 +12,10 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_TOPIC: edgearbiter
-      # trained actors (scripts/run_experiments.py writes models/<study>/<scenario>/...); without them the rules answer
-      # MODEL_DEVICE: /app/models/experiments/default/mappo_seed0_device.pt
-      # MODEL_EDGE: /app/models/experiments/default/mappo_seed0_edge.pt
+      # the MAPPO actors of the measured study (`energy_constrained`, seed 0), shipped in models/demo; actors you train
+      # yourself are under models/<study>/<scenario>/ (scripts/run_experiments.py). Without actors the rules answer.
+      MODEL_DEVICE: /app/models/demo/mappo_energy_constrained_device.pt
+      MODEL_EDGE: /app/models/demo/mappo_energy_constrained_edge.pt
     volumes:
       - ./models:/app/models:ro
     ports: ["8000:8000"]
@@ -30,5 +31,6 @@ services:
 
   virtual-node:                       # software stand-in for the ESP32 node (no hardware needed)
     build: .
-    command: ["python", "-m", "edgearbiter.virtual_node", "--broker", "mosquitto", "--interval", "1.0"]
+    command: ["python", "-m", "edgearbiter.virtual_node", "--broker", "mosquitto", "--interval", "1.0",
+              "--scenario", "energy_constrained", "--battery-j", "22.8"]
     depends_on: [mosquitto, nodered]

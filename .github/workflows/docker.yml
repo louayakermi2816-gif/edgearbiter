@@ -1,0 +1,50 @@
+name: docker
+
+# The README's `docker compose up --build` on a fresh runner: Mosquitto, the policy API with the MAPPO actors
+# of models/demo, Node-RED with the board, and the virtual ESP32 node. Checks that the node's telemetry is
+# answered, through Node-RED and the API, by the trained actors, and that the API docs and the board are served.
+on:
+  push:
+  pull_request:
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose up --build
+        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: The node's telemetry is answered by the trained actors, through Node-RED and the API
+        run: |
+          timeout 240 docker compose exec -T mosquitto mosquitto_sub -v -t 'edgearbiter/#' -C 250 > mqtt.log || true
+          python3 - mqtt.log <<'PY'
+          import collections, json, sys
+          seen, telemetry, decisions = collections.Counter(), set(), []
+          for line in open(sys.argv[1], encoding="utf-8"):
+              topic, _, payload = line.rstrip("\n").partition(" ")
+              seen[topic] += 1
+              if topic == "edgearbiter/telemetry":
+                  telemetry.add(json.loads(payload)["seq"])
+              elif topic == "edgearbiter/decision":
+                  decisions.append(json.loads(payload))
+          answered = [d for d in decisions if d.get("seq") in telemetry]
+          print(dict(seen))
+          print(f"{len(answered)} of {len(telemetry)} telemetry messages answered; last decision: {decisions[-1:]}")
+          assert len(answered) >= 20, "too few decisions came back"
+          assert all(d["policy"] == {"device": "actor", "edge": "actor"} for d in answered), "not the trained actors"
+          assert seen["edgearbiter/node"] >= 20, "the node did not report its outcomes"
+          PY
+      - name: The API docs and the board are served
+        run: |
+          curl -sf http://localhost:8000/health && echo
+          curl -sf -o /dev/null http://localhost:8000/docs
+          curl -sfL -o /dev/null http://localhost:1880/dashboard
+          docker compose logs nodered > nodered.log
+          if grep -iE "missing (node )?types|waiting for missing" nodered.log; then exit 1; fi
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color --tail 60
+      - name: Stop
+        if: always()
+        run: docker compose down

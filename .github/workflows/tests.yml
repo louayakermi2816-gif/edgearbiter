@@ -26,3 +26,47 @@ jobs:
         run: pytest -q
       - name: Simulator and baselines run end to end
         run: python scripts/run_baselines.py --episodes 2 --out /tmp/results
+
+  quickstart:
+    # The README's Quick start as a new user runs it, on Linux, macOS (Apple silicon) and Windows: a fresh
+    # virtual environment, the install from requirements.txt (PyTorch from PyPI), then each command in turn.
+    # Only the hour-long training run is shortened; uvicorn runs without --reload.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      ACTIVATE: source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: python -m venv .venv, pip install -r requirements.txt && pip install -e ".[dev,plot,iot]"
+        run: |
+          python -m venv .venv && eval "$ACTIVATE"
+          pip install -r requirements.txt && pip install -e ".[dev,plot,iot]"
+      - name: pytest -q
+        run: eval "$ACTIVATE" && pytest -q
+      - name: python scripts/run_baselines.py
+        run: eval "$ACTIVATE" && python scripts/run_baselines.py
+      - name: python scripts/run_experiments.py (shortened)
+        run: >
+          eval "$ACTIVATE" && python scripts/run_experiments.py --budget-fraction 0.7 --steps 20000 --seeds 0
+          --workers 2 --eval-every 10000 --episodes 2 --out "$RUNNER_TEMP/results" --models "$RUNNER_TEMP/models"
+      - name: python scripts/run_benchmark.py --weights random --no-data --threads 1 4 --tag quick
+        run: eval "$ACTIVATE" && python scripts/run_benchmark.py --weights random --no-data --threads 1 4 --tag quick
+      - name: uvicorn edgearbiter.api:app, then /health, /docs and /policy/decide
+        run: |
+          eval "$ACTIVATE"
+          uvicorn edgearbiter.api:app --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 90); do curl -sf http://127.0.0.1:8000/health && break; sleep 1; done
+          curl -sf -o /dev/null http://127.0.0.1:8000/docs
+          curl -sf -X POST http://127.0.0.1:8000/policy/decide -H 'content-type: application/json' \
+               -d '{"battery": 0.9, "queue": 12, "rtt_ms": 12, "bandwidth_mbps": 30, "arrivals": 6, "edge_load": 0.2}'
+          echo; cat uvicorn.log
