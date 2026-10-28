@@ -72,10 +72,23 @@ def _weights(enum, pretrained: bool):
     return enum.DEFAULT if pretrained else None
 
 
-def _engine(pretrained: bool) -> Dict:
-    """torchvision's INT8 builders take the engine from the pretrained weights, else default to fbgemm, which
-    ARM CPUs (Apple silicon) lack: random-init ones are built for the engine `build` selected on this CPU."""
-    return {} if pretrained else {"backend": torch.backends.quantized.engine}
+def _torchvision_int8(builder, weights, pretrained: bool) -> torch.nn.Module:
+    """A torchvision INT8 model. Pretrained weights carry their engine. Random-init ones are built for the engine
+    `build` selected on this CPU (torchvision's default, fbgemm, is x86-only: Apple silicon has qnnpack), and
+    quantised here with that engine's default qconfig when torchvision leaves them in FP32: it sets a qconfig for
+    fbgemm and qnnpack only, and PyTorch on Windows has neither (onednn)."""
+    if pretrained:
+        return builder(weights=weights.DEFAULT, quantize=True)
+    engine = torch.backends.quantized.engine
+    model = builder(weights=None, quantize=True, backend=engine)
+    if any(isinstance(m, torch.ao.nn.quantized.Conv2d) for m in model.modules()):
+        return model
+    model = builder(weights=None, quantize=False).eval()
+    model.fuse_model()
+    model.qconfig = torch.ao.quantization.get_default_qconfig(engine)
+    torch.ao.quantization.prepare(model, inplace=True)
+    model(torch.rand(1, 3, 224, 224))
+    return torch.ao.quantization.convert(model)
 
 
 def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_small", int8: bool = False,
@@ -113,10 +126,9 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
         "resnet18": ModelSpec(lambda p: tvm.resnet18(weights=_weights(tvm.ResNet18_Weights, p))),
         "efficientnet_b0": ModelSpec(lambda p: tvm.efficientnet_b0(weights=_weights(tvm.EfficientNet_B0_Weights, p))),
         # INT8 (quantised) variants shipped by torchvision
-        "mobilenet_v3_large_int8": ModelSpec(lambda p: tvq.mobilenet_v3_large(weights=_weights(qmnv3, p), quantize=True,
-                                                                              **_engine(p)),
+        "mobilenet_v3_large_int8": ModelSpec(lambda p: _torchvision_int8(tvq.mobilenet_v3_large, qmnv3, p),
                                              backend=qmnv3.DEFAULT.meta["backend"]),
-        "resnet18_int8": ModelSpec(lambda p: tvq.resnet18(weights=_weights(qr18, p), quantize=True, **_engine(p)),
+        "resnet18_int8": ModelSpec(lambda p: _torchvision_int8(tvq.resnet18, qr18, p),
                                    backend=qr18.DEFAULT.meta["backend"]),
         # detector (latency only unless a COCO evaluation is wired in), FP32 and post-training INT8
         "ssdlite320_mobilenet_v3_large": ModelSpec(ssdlite, img=320, detector=True),
@@ -168,10 +180,11 @@ def build(spec: ModelSpec, pretrained: bool) -> torch.nn.Module:
     if spec.backend:
         set_quant_engine(spec.backend)
     # eager-mode quantisation is deprecated upstream (still shipped in torch 2.14); random-init INT8
-    # models also convert observers that saw no data. Neither affects the latency measurement.
+    # models also convert observers that saw no data. Neither affects the latency measurement. A torchvision
+    # model left without a qconfig is quantised by `_torchvision_int8`.
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*(torch\.ao\.quantization is deprecated|must run observer"
-                                                  r"|quantized tensor creation functions)")
+                                                  r"|quantized tensor creation functions|None of the submodule)")
         return spec.build(pretrained).eval()
 
 
