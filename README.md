@@ -123,6 +123,10 @@ python scripts/run_benchmark.py --weights random --no-data --threads 1 4 --tag q
 uvicorn edgearbiter.api:app --reload                   # http://127.0.0.1:8000/docs
 ```
 
+On Linux, `pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision` before the
+install skips PyTorch's CUDA build (over 2 GB). In Windows PowerShell, if activating the environment is
+refused, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
 The `tests` workflow runs these commands as written on Linux, macOS (Apple silicon) and Windows on every
 push (only the hour-long training run is shortened). [Reproducing everything](#reproducing-everything) lists
 the full pipeline, from training to the board.
