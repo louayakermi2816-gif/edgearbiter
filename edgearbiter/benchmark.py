@@ -274,15 +274,16 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                 if data_root:
                     loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True,
                                                               batch_size=64 if spec.qat else 32, augment=spec.qat))
-                images = loaders.get(key)
+                images, fast = loaders.get(key), False
                 if images is None:
                     if pretrained:
                         raise ValueError(f"{name}: INT8 quantisation of trained weights needs calibration / training "
                                          f"images (Imagenette, data_root)")
-                    # random weights measure latency and memory only: random images calibrate them as well
-                    images = [(torch.rand(8, 3, spec.img, spec.img), torch.randint(0, 10, (8,))) for _ in range(2)]
+                    # random weights measure latency and memory only: random images and min/max observers calibrate
+                    # them as well (same INT8 graph), in seconds
+                    images, fast = [(torch.rand(8, 3, spec.img, spec.img), torch.randint(0, 10, (8,))) for _ in range(2)], True
                 model = (quantize_qat(model, images, backend=spec.backend, img=spec.img) if spec.qat else
-                         quantize_ptq(model, images, backend=spec.backend, batches=calib_batches, img=spec.img))
+                         quantize_ptq(model, images, backend=spec.backend, batches=calib_batches, img=spec.img, fast=fast))
                 # trained weights: keep the calibrated model for deployment (API /infer); random ones: temporary
                 int8_state = str(int8_state_path(models_dir, name) if pretrained else Path(tmp) / f"{name}.pt")
                 torch.save(model.state_dict(), int8_state)

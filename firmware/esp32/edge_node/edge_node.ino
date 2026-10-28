@@ -68,7 +68,7 @@ const float RADIO_MJ = 10.0f;                  // sending one 40 KB frame to the
 const float BUDGET_J = 22.8f;                  // energy_constrained budget per 300 s episode
 
 // explicit prototypes: every toolchain (Arduino IDE / CLI, PlatformIO, Wokwi) builds the sketch the same way
-void onFrame();                                        // runs in IRAM (definition below)
+void IRAM_ATTR onFrame();                              // the interrupt handler runs from IRAM
 float readBattery();
 int poisson(float lambda);
 int frameArrivals();
@@ -103,7 +103,7 @@ float accuracySum = 0.0f, energyJ = 0.0f;
 int ledToggles = 0;
 unsigned long ledNext = 0;
 
-void IRAM_ATTR onFrame() { pressed = pressed + 1; }
+void onFrame() { pressed = pressed + 1; }            // IRAM_ATTR on the prototype only: one section
 
 float readBattery() {
 #if BATTERY_MODEL
@@ -154,7 +154,7 @@ void publishJson(const char* subtopic, JsonDocument& doc) {
 #else
   char topic[64];
   snprintf(topic, sizeof(topic), "%s/%s", TOPIC, subtopic);
-  mqtt.publish(topic, buf);                            // const char* overload: not retained
+  mqtt.publish(topic, (const uint8_t*)buf, n, false);  // not retained
 #endif
 }
 
