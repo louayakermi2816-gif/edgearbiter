@@ -49,6 +49,33 @@ def test_benchmark_rows_and_table():
     assert "Random-init weights" in md and md.count("| mobilenet_v3_small |") == 2
 
 
+def test_torchvision_int8_models_are_quantised_on_every_engine():
+    """torchvision quantises a ResNet for fbgemm and qnnpack only; PyTorch on Windows has onednn only."""
+    import warnings
+    spec, before = model_zoo()["resnet18_int8"], torch.backends.quantized.engine
+    try:
+        for engine in set(torch.backends.quantized.supported_engines) - {"none"}:
+            torch.backends.quantized.engine = engine
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = spec.build(False)
+            assert any(isinstance(m, torch.ao.nn.quantized.Conv2d) for m in model.modules()), engine
+            assert state_dict_size_mb(model) < 15, engine                      # FP32: 46.8 MB
+    finally:
+        torch.backends.quantized.engine = before
+
+
+def test_random_init_int8_models_calibrate_without_data(tmp_path):
+    """The README's quick benchmark (`--weights random --no-data`) includes models quantised here."""
+    from edgearbiter.finetune import build_model, checkpoint_path
+    name = "mobilenet_v3_small_imagenette_scratch_int8"
+    rows = benchmark_models([name], iters=2, threads=(1,), pretrained=False, models_dir=str(tmp_path))
+    assert rows[0]["int8"] and rows[0]["quantisation"] == "PTQ (FX)" and rows[0]["accuracy"] is None
+    torch.save(build_model(pretrained=False).state_dict(), checkpoint_path(str(tmp_path), "scratch"))
+    with pytest.raises(ValueError, match="calibration"):                # trained weights need real images
+        benchmark_models([name], pretrained=True, models_dir=str(tmp_path))
+
+
 def test_post_training_int8_keeps_predictions_and_restores_from_state():
     import io
     from edgearbiter.finetune import build_model

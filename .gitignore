@@ -8,6 +8,7 @@ data/*
 !data/.gitkeep
 models/*
 !models/.gitkeep
+!models/demo/
 results/*
 !results/.gitkeep
 !results/*.md

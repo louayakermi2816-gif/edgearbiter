@@ -72,6 +72,25 @@ def _weights(enum, pretrained: bool):
     return enum.DEFAULT if pretrained else None
 
 
+def _torchvision_int8(builder, weights, pretrained: bool) -> torch.nn.Module:
+    """A torchvision INT8 model. Pretrained weights carry their engine. Random-init ones are built for the engine
+    `build` selected on this CPU (torchvision's default, fbgemm, is x86-only: Apple silicon has qnnpack), and
+    quantised here with that engine's default qconfig when torchvision leaves them in FP32: it sets a qconfig for
+    fbgemm and qnnpack only, and PyTorch on Windows has neither (onednn)."""
+    if pretrained:
+        return builder(weights=weights.DEFAULT, quantize=True)
+    engine = torch.backends.quantized.engine
+    model = builder(weights=None, quantize=True, backend=engine)
+    if any(isinstance(m, torch.ao.nn.quantized.Conv2d) for m in model.modules()):
+        return model
+    model = builder(weights=None, quantize=False).eval()
+    model.fuse_model()
+    model.qconfig = torch.ao.quantization.get_default_qconfig(engine)
+    torch.ao.quantization.prepare(model, inplace=True)
+    model(torch.rand(1, 3, 224, 224))
+    return torch.ao.quantization.convert(model)
+
+
 def _imagenette_model(models_dir: str, init: str, arch: str = "mobilenet_v3_small", int8: bool = False,
                       qat: bool = False) -> ModelSpec:
     """A model trained by `edgearbiter.finetune` (10-class head, its own input size), FP32 or INT8 (PTQ, or QAT)."""
@@ -107,9 +126,9 @@ def model_zoo(models_dir: str = "models") -> Dict[str, ModelSpec]:
         "resnet18": ModelSpec(lambda p: tvm.resnet18(weights=_weights(tvm.ResNet18_Weights, p))),
         "efficientnet_b0": ModelSpec(lambda p: tvm.efficientnet_b0(weights=_weights(tvm.EfficientNet_B0_Weights, p))),
         # INT8 (quantised) variants shipped by torchvision
-        "mobilenet_v3_large_int8": ModelSpec(lambda p: tvq.mobilenet_v3_large(weights=_weights(qmnv3, p), quantize=True),
+        "mobilenet_v3_large_int8": ModelSpec(lambda p: _torchvision_int8(tvq.mobilenet_v3_large, qmnv3, p),
                                              backend=qmnv3.DEFAULT.meta["backend"]),
-        "resnet18_int8": ModelSpec(lambda p: tvq.resnet18(weights=_weights(qr18, p), quantize=True),
+        "resnet18_int8": ModelSpec(lambda p: _torchvision_int8(tvq.resnet18, qr18, p),
                                    backend=qr18.DEFAULT.meta["backend"]),
         # detector (latency only unless a COCO evaluation is wired in), FP32 and post-training INT8
         "ssdlite320_mobilenet_v3_large": ModelSpec(ssdlite, img=320, detector=True),
@@ -161,10 +180,11 @@ def build(spec: ModelSpec, pretrained: bool) -> torch.nn.Module:
     if spec.backend:
         set_quant_engine(spec.backend)
     # eager-mode quantisation is deprecated upstream (still shipped in torch 2.14); random-init INT8
-    # models also convert observers that saw no data. Neither affects the latency measurement.
+    # models also convert observers that saw no data. Neither affects the latency measurement. A torchvision
+    # model left without a qconfig is quantised by `_torchvision_int8`.
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*(torch\.ao\.quantization is deprecated|must run observer"
-                                                  r"|quantized tensor creation functions)")
+                                                  r"|quantized tensor creation functions|None of the submodule)")
         return spec.build(pretrained).eval()
 
 
@@ -248,7 +268,8 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
                      pretrained: bool = True, data_root: Optional[str] = None, max_batches: Optional[int] = None,
                      models_dir: str = "models", cpu_quota: Optional[float] = None, calib_batches: int = 16) -> List[Dict]:
     """One row per (model, thread count). Accuracy needs trained/pretrained weights and `data_root`;
-    INT8 models trained here (`*_int8`) need `data_root` for their calibration images."""
+    INT8 models quantised here (`*_int8`, `*_int8qat`) need `data_root` for their calibration / training
+    images, except with random weights (latency and memory only), which calibrate on random images."""
     from contextlib import nullcontext
     from .cpulimit import CpuLimit
     zoo = model_zoo(models_dir); loaders: Dict[tuple, object] = {}
@@ -262,13 +283,20 @@ def benchmark_models(names: List[str], role: str = "device", iters: int = 50, th
             int8_state = None
             if spec.ptq:
                 from .quantize import quantize_ptq, quantize_qat
-                if not data_root:
-                    raise ValueError(f"{name}: INT8 quantisation needs calibration / training images (data_root)")
                 key = ("train", spec.img, spec.qat)
-                loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True,
-                                                          batch_size=64 if spec.qat else 32, augment=spec.qat))
-                model = (quantize_qat(model, loaders[key], backend=spec.backend, img=spec.img) if spec.qat else
-                         quantize_ptq(model, loaders[key], backend=spec.backend, batches=calib_batches, img=spec.img))
+                if data_root:
+                    loaders.setdefault(key, imagenette_loader(data_root, spec.img, split="train", shuffle=True,
+                                                              batch_size=64 if spec.qat else 32, augment=spec.qat))
+                images, fast = loaders.get(key), False
+                if images is None:
+                    if pretrained:
+                        raise ValueError(f"{name}: INT8 quantisation of trained weights needs calibration / training "
+                                         f"images (Imagenette, data_root)")
+                    # random weights measure latency and memory only: random images and min/max observers calibrate
+                    # them as well (same INT8 graph), in seconds
+                    images, fast = [(torch.rand(8, 3, spec.img, spec.img), torch.randint(0, 10, (8,))) for _ in range(2)], True
+                model = (quantize_qat(model, images, backend=spec.backend, img=spec.img) if spec.qat else
+                         quantize_ptq(model, images, backend=spec.backend, batches=calib_batches, img=spec.img, fast=fast))
                 # trained weights: keep the calibrated model for deployment (API /infer); random ones: temporary
                 int8_state = str(int8_state_path(models_dir, name) if pretrained else Path(tmp) / f"{name}.pt")
                 torch.save(model.state_dict(), int8_state)

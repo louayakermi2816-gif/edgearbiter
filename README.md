@@ -2,6 +2,14 @@
 
 [![tests](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/tests.yml/badge.svg)](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/tests.yml)
 [![firmware](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/firmware.yml/badge.svg)](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/firmware.yml)
+[![docker](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/docker.yml/badge.svg)](https://github.com/louayakermi2816-gif/edgearbiter/actions/workflows/docker.yml)
+
+<img alt="The Node-RED board live: the trained agents choose the model, sensing rate and placement every second while the battery drains and the edge load changes" src="docs/demo.gif" width="900">
+
+*The control loop live, sped up about 5×: every second the virtual ESP32 node sends its telemetry, the
+trained device agent picks the model, the sensing rate and where to run it, the edge agent admits the
+offload or not, and the Node-RED board shows the decision, battery and edge load, the episode's KPIs,
+latency and model tier. [Run it yourself](#demo).*
 
 Real-time AI on IoT devices has to trade **accuracy against latency, energy and
 network quality**: which model to run, how often to sense, and whether to run it
@@ -45,7 +53,7 @@ ESP32 firmware in QEMU (serial bridge) / virtual node ──MQTT──▶ Node-R
 ## Status (October 2026)
 
 In development since September 2026. Every number below comes from a file in
-[`results/`](results/) written by the scripts in this repository.
+[`results/`](results/) written by the scripts in this repository (the demo's, from its printed output).
 
 | Part | State |
 |---|---|
@@ -56,10 +64,51 @@ In development since September 2026. Every number below comes from a file in
 | RL study on the measured table (2 scenarios, 3 seeds) | done — [results/experiments.md](results/experiments.md) |
 | RL study on the synthetic development table | done — [results/experiments_synthetic.md](results/experiments_synthetic.md) |
 | Multi-device studies: 3 and 5 devices sharing one edge (IPPO / MAPPO, learned edge, transfer, fine-tuning) | done — [3 devices](results/fleet.md), [5 devices](results/fleet5.md) |
-| Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI |
+| Software IoT loop: virtual ESP32 node ↔ MQTT ↔ Node-RED board ↔ FastAPI | run end to end here with the MAPPO actors of the measured study: 150 / 150 decisions answered through Node-RED, mean round trip 12.7 ms; MQTT loop tested in CI; `docker compose up --build` run on every push (workflow `docker`) |
+| [Demo](#demo) | the recording above; `python scripts/demo.py` (one command, no Docker); the Docker stack with the board |
 | Fine-tuning from ImageNet weights, INT8 by PTQ and QAT; top-1 of the pretrained zoo; detector COCO mAP | done on a GitHub-hosted runner (workflow [`pretrained`](.github/workflows/pretrained.yml); the build environment cannot download the weights): fine-tuned 94.4–96.6 % top-1; SSDLite 21.3 mAP in FP32, 19.3 in INT8 — [fine-tuning](#fine-tuned-from-imagenet-weights-and-int8-by-qat), [COCO](results/coco_map.md) |
-| ESP32 firmware (Arduino core 3.3.12, Espressif toolchain) | done — both builds compile (Wi-Fi + MQTT, serial); the serial build runs in Espressif's QEMU and feeds the Node-RED board through a serial ↔ MQTT bridge: 92 / 92 telemetry messages answered, 11 ms median round trip on the broker; build and QEMU boot checked in CI |
-| The firmware on a physical ESP32 or in Wokwi; Docker stack | not run (no hardware; wokwi.com and Docker are not available in the build environment) |
+| ESP32 firmware (Arduino core 3.3.12, Espressif toolchain) | done — both builds compile (Wi-Fi + MQTT, serial); the serial build runs in Espressif's QEMU and feeds the Node-RED board through a serial ↔ MQTT bridge: 92 / 92 telemetry messages answered, 11 ms median round trip on the broker; build and QEMU boot checked in CI; also builds with PlatformIO (CI) |
+| Quick start on Linux, macOS (Apple silicon) and Windows | run as written on every push (workflow `tests`, job `quickstart`) |
+| The firmware on a physical ESP32, or in the Wokwi simulator | not run (no hardware; Wokwi needs an account, and wokwi.com is not reachable from the build environment) |
+
+## Demo
+
+**Watch it**: the recording at the top. The virtual ESP32 node (`edgearbiter/virtual_node.py`) runs the
+`energy_constrained` scenario, and the MAPPO agents of the measured study (seed 0, shipped in
+`models/demo/`) answer through Node-RED and the policy service.
+
+**Run it in one command**, after the [Quick start](#quick-start)'s install (no Docker, Node.js or hardware):
+
+```bash
+python scripts/demo.py            # MQTT broker, policy service and virtual node; prints the agents' decisions
+python scripts/demo.py --rules    # the rule-based policies instead, for comparison
+```
+
+```
+EdgeArbiter demo: scenario energy_constrained, 22.8 J of battery for a 300 s episode, trained MAPPO agents (device, edge)
+    t  battery  link                    edge load  decision                                                  latency
+   1s    100 %  good   30 Mbps   12 ms       30 %  MobileNetV3-Small FP32 @ 5 fps, offloaded, edge admits      39 ms
+   5s    100 %  good   35 Mbps    8 ms       31 %  ResNet-18 INT8 @ 10 fps, offloaded, edge admits             35 ms
+  ...
+  42s     96 %  poor    1 Mbps   94 ms       16 %  ResNet-18 INT8 @ 5 fps, on the device                       40 ms
+  43s     96 %  poor    1 Mbps  172 ms       10 %  ResNet-18 INT8 @ 1 fps, on the device                       40 ms
+  ...
+Episode over at t = 300 s (end of the episode): mean accuracy 85.8 %, deadline misses 7.8 %, energy 18.0 of 22.8 J, 1168 frames processed (614 offloaded, 0 dropped), return 919.1
+```
+
+The agents offload while the link is good and keep the frames on the device when it is poor. With the
+same seed, the rule-based policies empty the battery at t = 267 s, with a mean accuracy of 83.7 % and
+1.7 % deadline misses: the agents keep a higher accuracy and a battery that lasts the whole episode, at
+the cost of more deadline misses.
+
+**With the board**: install Docker (Docker Desktop on Windows or macOS), then
+
+```bash
+docker compose up --build         # Mosquitto, the policy service, Node-RED with the board, the virtual node
+```
+
+and open http://localhost:1880/dashboard. The `docker` workflow runs exactly this on every push and checks
+that the agents answer the node through Node-RED.
 
 ## Quick start
 
@@ -74,8 +123,13 @@ python scripts/run_benchmark.py --weights random --no-data --threads 1 4 --tag q
 uvicorn edgearbiter.api:app --reload                   # http://127.0.0.1:8000/docs
 ```
 
-[Reproducing everything](#reproducing-everything) lists the full pipeline, from training to
-the board.
+On Linux, `pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision` before the
+install skips PyTorch's CUDA build (over 2 GB). In Windows PowerShell, if activating the environment is
+refused, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
+The `tests` workflow runs these commands as written on Linux, macOS (Apple silicon) and Windows on every
+push (only the hour-long training run is shortened). [Reproducing everything](#reproducing-everything) lists
+the full pipeline, from training to the board.
 
 ## Models and measured costs
 
@@ -647,7 +701,8 @@ python -m edgearbiter.virtual_node --scenario energy_constrained --battery-j 22.
 ```
 
 `docker compose up --build` runs the same four parts (Mosquitto, API, Node-RED with the
-dashboard, virtual node). For an RL library, `edgearbiter.sim.DeviceEnv` exposes the device
+dashboard, virtual node), with the MAPPO actors of `models/demo/` answering in `energy_constrained`
+as on the board above; the `docker` workflow runs it on every push. For an RL library, `edgearbiter.sim.DeviceEnv` exposes the device
 agent as a Gymnasium environment (edge on its rule, passes
 `gymnasium.utils.env_checker.check_env`).
 
@@ -744,7 +799,9 @@ edgearbiter/serial_bridge.py  serial <-> MQTT bridge for the firmware's serial b
 firmware/esp32/edge_node/     ESP32 telemetry + decision node (Arduino) and its Wokwi project
 firmware/esp32/build.sh       arduino-cli build: Wi-Fi + MQTT, or serial transport
 node-red/flows.json           control loop (telemetry -> /policy/decide -> decision) and the board
-scripts/                      finetune_imagenette, run_benchmark, run_baselines, run_experiments,
+models/demo/                  MAPPO actors (device, edge) of the measured study, energy_constrained, seed 0
+docs/                         the demo recording and the board screenshots
+scripts/                      demo, finetune_imagenette, run_benchmark, run_baselines, run_experiments,
                               run_fleet, train_single_agent, train_marl, inspect_policy, run_qemu_node,
                               eval_coco
 tests/                        simulator, fleet, agents, benchmark, training loop, experiments, API, MQTT loop, serial bridge
@@ -772,7 +829,8 @@ tests/                        simulator, fleet, agents, benchmark, training loop
 - Post-training quantisation uses `torch.ao.quantization`, deprecated upstream in favour
   of torchao; it still ships with torch 2.14.
 - The firmware has run in QEMU, not on a chip: QEMU emulates the ESP32 but not its radio, so
-  the Wi-Fi + MQTT build compiles but has not run, and Wokwi was not available. The firmware
+  the Wi-Fi + MQTT build compiles (arduino-cli and PlatformIO) but has not run, and the Wokwi
+  simulation has not been run. The firmware
   publishes telemetry and applies decisions; it does not run the image models, whose costs
   come from the emulated-device benchmark.
 - A physical device has no episode: for the firmware the API feeds `t_fraction` = 0 and

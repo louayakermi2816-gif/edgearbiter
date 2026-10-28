@@ -1,7 +1,8 @@
 name: firmware
 
 # The ESP32 node: build both transports with the Espressif toolchain (Arduino core 3.3.12), then boot the
-# serial build in Espressif's QEMU and check that it publishes telemetry and applies a decision.
+# serial build in Espressif's QEMU and check that it publishes telemetry and applies a decision. Also build
+# the sketch with PlatformIO, the build that Wokwi for VS Code runs (wokwi.toml points at its output).
 on:
   push:
   pull_request:
@@ -43,3 +44,21 @@ jobs:
         run: |
           pip install numpy gymnasium
           python scripts/run_qemu_node.py --check --verbose
+
+  platformio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ hashFiles('firmware/esp32/edge_node/platformio.ini') }}
+      - name: pio run
+        run: |
+          pip install platformio
+          pio run -d firmware/esp32/edge_node

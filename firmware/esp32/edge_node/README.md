@@ -24,7 +24,8 @@ firmware/esp32/build.sh mqtt      # Wi-Fi + MQTT: 919 KB of flash (70 %)
 firmware/esp32/build.sh serial    # serial transport, DIO flash mode: 287 KB (21 %)
 ```
 
-The CI workflow `firmware` builds both on every push.
+The CI workflow `firmware` builds both on every push, and builds the sketch with PlatformIO too
+(`pio run` in this folder: platform espressif32 8.0.0, the same Arduino core 3.3.12).
 
 ## Run in Espressif's QEMU (verified)
 
@@ -60,5 +61,5 @@ On a public broker anyone can read these topics: change `TOPIC` in the sketch an
 of the flow to a prefix of your own. Run one node at a time (decisions are broadcast). Without
 Wokwi, the Python virtual node speaks the same protocol: `python -m edgearbiter.virtual_node`.
 
-wokwi.com and the PlatformIO registry were not reachable from the build environment, so the Wokwi
-and PlatformIO paths are untested; the arduino-cli build and the QEMU run are.
+The PlatformIO build that Wokwi for VS Code runs is checked in CI; the Wokwi simulation itself has
+not been run (it needs a Wokwi account, and wokwi.com is not reachable from the build environment).
