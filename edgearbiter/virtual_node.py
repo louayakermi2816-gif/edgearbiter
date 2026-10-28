@@ -42,7 +42,7 @@ class VirtualNode:
         self.env = EdgeArbiterEnv(costs or CostTable.load(), cfg)
         self.seed = seed
         self.obs, _ = self.env.reset(seed=seed)
-        self.seq, self.episode, self.started = 0, 0, time.time()
+        self.seq, self.episode, self.started = 0, 0, time.monotonic()      # durations: immune to clock changes
         self.stats = {"decisions": 0, "timeouts": 0, "rtt_ms_sum": 0.0}
         self._decision: Optional[dict] = None
         self._last_decision: Optional[dict] = None
@@ -50,7 +50,7 @@ class VirtualNode:
         self.client = None
         if broker:
             import paho.mqtt.client as mqtt
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{node_id}-{int(self.started)}")
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{node_id}-{int(time.time())}")
             if not api:                                   # decisions arrive over MQTT (from Node-RED)
                 self.client.on_connect = lambda c, u, f, rc, p: c.subscribe(f"{topic}/decision")
             self.client.on_message = self._on_message
@@ -83,18 +83,18 @@ class VirtualNode:
         return {"node": self.node_id, "seq": self.seq, "battery": round(env.battery, 4), "queue": env.queue,
                 "rtt_ms": round(env.link.rtt_ms, 1), "bandwidth_mbps": round(env.link.bandwidth_mbps, 2),
                 "arrivals": last["arrivals"], "violation_rate": round(last["violations"] / max(1, last["processed"]), 3),
-                "t_fraction": round(env.t / env.cfg.horizon, 4), "uptime_s": round(time.time() - self.started, 1),
+                "t_fraction": round(env.t / env.cfg.horizon, 4), "uptime_s": round(time.monotonic() - self.started, 1),
                 "tier": last["tier"], "placement": "edge" if last["where"] == "edge" else "local"}
 
     def _wait_decision(self, seq: int) -> Optional[dict]:
-        deadline = time.time() + self.timeout
+        deadline = time.monotonic() + self.timeout
         with self._cv:
             while True:
                 d = self._decision
                 if d is not None and d.get("seq", seq) == seq:
                     self._decision = None
                     return d
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
                 self._cv.wait(remaining)
@@ -136,13 +136,13 @@ class VirtualNode:
     # ------------------------------------------------------------ main loop
     def step(self) -> dict:
         """One control interval: telemetry -> decision -> simulated execution -> outcome."""
-        t0 = time.time()
+        t0 = time.monotonic()
         self.seq += 1
         tel = self.telemetry()
         self._publish("edge", {"edge_load": round(self.env.edge_load.value, 4)})
         self._publish("telemetry", tel)
         decision = self._ask_api(tel) if self.api else self._wait_decision(tel["seq"])
-        rtt_ms = (time.time() - t0) * 1000.0
+        rtt_ms = (time.monotonic() - t0) * 1000.0
         if decision is None:
             self.stats["timeouts"] += 1
         else:
@@ -170,9 +170,9 @@ class VirtualNode:
         n = 0
         try:
             while steps is None or n < steps:
-                t0 = time.time()
+                t0 = time.monotonic()
                 self.step(); n += 1
-                time.sleep(max(0.0, self.interval - (time.time() - t0)))
+                time.sleep(max(0.0, self.interval - (time.monotonic() - t0)))
         except KeyboardInterrupt:
             pass
         return self.summary()

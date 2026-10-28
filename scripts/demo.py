@@ -108,7 +108,7 @@ def main():
     last = None
     try:
         for _ in range(args.steps):
-            t0 = time.time()
+            t0 = time.monotonic()
             env = node.env
             link = f"{LINK_STATES[env.link.state]:<4} {env.link.bandwidth_mbps:4.0f} Mbps {env.link.rtt_ms:4.0f} ms"
             battery, edge_load = env.battery, env.edge_load.value
@@ -126,7 +126,7 @@ def main():
             if ended:
                 print(episode_summary(ended.pop()))
                 last = None
-            time.sleep(max(0.0, args.interval - (time.time() - t0)))
+            time.sleep(max(0.0, args.interval - (time.monotonic() - t0)))
     except KeyboardInterrupt:
         pass
     finally:

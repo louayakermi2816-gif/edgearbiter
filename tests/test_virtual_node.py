@@ -71,6 +71,6 @@ def test_mqtt_loop_with_a_policy_service():
     finally:
         node.close(); bridge.loop_stop(); watcher.loop_stop()
     time.sleep(0.2)
-    assert summary["decisions"] == 30 and summary["timeouts"] == 0
-    assert summary["kpis"]["processed"] > 0 and summary["mean_loop_rtt_ms"] > 0
-    assert len(seen) >= 25 and {"tier", "where", "battery", "kpis", "loop_rtt_ms"} <= set(seen[-1])
+    assert summary["decisions"] == 30 and summary["timeouts"] == 0, summary
+    assert summary["kpis"]["processed"] > 0 and summary["mean_loop_rtt_ms"] > 0, summary
+    assert len(seen) >= 25 and {"tier", "where", "battery", "kpis", "loop_rtt_ms"} <= set(seen[-1]), (len(seen), summary)
